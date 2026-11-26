@@ -22,6 +22,8 @@ enum AuthMethod {
   PHONE_OTP
   GOOGLE
   DEV
+  EMAIL_PASSWORD
+  PHONE_PASSCODE
 }
 
 enum Availability {
@@ -58,6 +60,10 @@ model User {
   gender                 String?
   emailVerifiedAt        DateTime?
   phoneVerifiedAt        DateTime?
+  /// scrypt hash of the account password (email sign-up) or 6-digit passcode (mobile sign-up).
+  passwordHash           String?
+  failedLoginCount       Int                     @default(0)
+  lockedUntil            DateTime?
   /// Legacy (former public demo mode); unused.
   demoDeviceHash         String?
   sessions               Session[]
@@ -92,7 +98,16 @@ model Session {
   @@map("sessions")
 }
 
-/// One-time password challenge for sign-in / sign-up. Only a hash of the code is stored.
+/// Server-generated secrets (e.g. the session signing key). Never sent to clients.
+model AppSecret {
+  name      String   @id
+  value     String
+  createdAt DateTime @default(now())
+
+  @@map("app_secrets")
+}
+
+/// Legacy (former OTP sign-in); unused.
 model OtpChallenge {
   id         String    @id @default(cuid())
   /// "email" | "phone"

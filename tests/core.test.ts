@@ -4,9 +4,10 @@ import { groupOffers, matchKeyFor } from "../src/server/pricing/matcher";
 import { mockHistory, offerFor, priceOn, searchCatalog, syntheticProducts } from "../src/server/providers/mock/pricing";
 import { MOCK_CATALOG } from "../src/server/providers/mock/catalog";
 import { matchRetailer, retailerSearchQuery, retailerSearchUrl } from "../src/features/retailers/retailers";
-import { sendOtpSchema, signupProfileSchema } from "../src/features/auth/schemas";
+import { signinSchema, signupSchema } from "../src/features/auth/schemas";
+import { hashSecret, verifySecret } from "../src/lib/passwords";
+import { safeNextPath } from "../src/lib/safe-next";
 import { parseGoogleCse, parseSerpApiImages, pickImage } from "../src/server/images/image-search";
-import { parseSender } from "../src/server/auth/mail-address";
 import { discountPercent, formatINR } from "../src/lib/utils";
 import type { ProviderOffer } from "../src/server/providers/types";
 
@@ -50,10 +51,10 @@ test("retailer names from aggregators map to known retailers", () => {
   assert.equal(matchRetailer("Some Random Shop"), undefined);
 });
 
-test("OTP schema normalises Indian phone numbers", () => {
-  const r = sendOtpSchema.parse({ channel: "phone", phone: "98765 43210" });
-  assert.equal(r.channel === "phone" && r.phone, "+919876543210");
-  assert.throws(() => sendOtpSchema.parse({ channel: "phone", phone: "12345" }));
+test("sign-in schema normalises Indian phone numbers", () => {
+  const r = signinSchema.parse({ method: "phone", phone: "98765 43210", secret: "123456" });
+  assert.equal(r.method === "phone" && r.phone, "+919876543210");
+  assert.equal(signinSchema.safeParse({ method: "phone", phone: "12345", secret: "123456" }).success, false);
 });
 
 test("formatting helpers", () => {
@@ -62,15 +63,41 @@ test("formatting helpers", () => {
   assert.match(formatINR(129999), /1,29,999/);
 });
 
-test("sign-up profile requires all fields and a plausible date of birth", () => {
-  const ok = signupProfileSchema.parse({ name: " Priya Sharma ", email: "Priya@Example.com", phone: "98765 43210", dateOfBirth: "1995-04-12", gender: "female" });
-  assert.equal(ok.name, "Priya Sharma");
-  assert.equal(ok.email, "priya@example.com");
-  assert.equal(ok.phone, "+919876543210");
+test("sign-up: email + strong password, or mobile + 6-digit passcode, plus a plausible DOB", () => {
+  const base = { name: " Priya Sharma ", dateOfBirth: "1995-04-12", gender: "female" };
+  const e = signupSchema.parse({ ...base, method: "email", email: "Priya@Example.com", phone: "", secret: "shop4deals" });
+  assert.equal(e.name, "Priya Sharma");
+  assert.equal(e.email, "priya@example.com");
+  assert.equal(e.phone, undefined);
+  const p = signupSchema.parse({ ...base, method: "phone", phone: "98765 43210", email: "", secret: "482913" });
+  assert.equal(p.phone, "+919876543210");
+  assert.equal(signupSchema.safeParse({ ...base, method: "email", email: "a@b.in", secret: "short1" }).success, false);
+  assert.equal(signupSchema.safeParse({ ...base, method: "email", email: "a@b.in", secret: "onlyletters" }).success, false);
+  assert.equal(signupSchema.safeParse({ ...base, method: "phone", phone: "9876543210", secret: "12345" }).success, false);
+  assert.equal(signupSchema.safeParse({ ...base, method: "phone", phone: "9876543210", secret: "abcdef" }).success, false);
   const thisYear = new Date().getUTCFullYear();
-  assert.equal(signupProfileSchema.safeParse({ ...ok, dateOfBirth: `${thisYear - 5}-01-01` }).success, false);
-  assert.equal(signupProfileSchema.safeParse({ ...ok, gender: "other" }).success, false);
-  assert.equal(signupProfileSchema.safeParse({ ...ok, name: "" }).success, false);
+  assert.equal(signupSchema.safeParse({ ...base, dateOfBirth: `${thisYear - 5}-01-01`, method: "phone", phone: "9876543210", secret: "482913" }).success, false);
+  assert.equal(signupSchema.safeParse({ ...base, gender: "other", method: "phone", phone: "9876543210", secret: "482913" }).success, false);
+});
+
+test("passwords are salted scrypt hashes and verify only the right secret", async () => {
+  const h1 = await hashSecret("shop4deals");
+  const h2 = await hashSecret("shop4deals");
+  assert.notEqual(h1, h2);
+  assert.match(h1, /^scrypt\$16384\$8\$1\$/);
+  assert.equal(await verifySecret("shop4deals", h1), true);
+  assert.equal(await verifySecret("shop4deal", h1), false);
+  assert.equal(await verifySecret("anything", null), false);
+});
+
+test("next redirects stay on this site", () => {
+  assert.equal(safeNextPath("/search?q=iphone#top"), "/search?q=iphone#top");
+  for (const bad of ["//evil.com", "/\\evil.com", "/\\/evil.com", "https://evil.com", "javascript:alert(1)", "/%0d%0aSet-Cookie:x", "/\tevil", "", null, undefined]) {
+    const out = safeNextPath(bad as string);
+    assert.ok(out === "/home" || (out.startsWith("/") && !out.startsWith("//")), `unsafe: ${String(bad)} -> ${out}`);
+  }
+  assert.equal(safeNextPath("//evil.com"), "/home");
+  assert.equal(safeNextPath("/\\evil.com"), "/home");
 });
 
 test("retailer deep links search the retailer site for the product", () => {
@@ -94,10 +121,4 @@ test("image search prefers large https photos from retailer CDNs", () => {
   const serp = parseSerpApiImages({ images_results: [{ original: "https://x.example/logo.svg" }, { original: "https://rukminim2.flixcart.com/image/p.jpeg", original_width: 600, original_height: 600 }] });
   assert.equal(pickImage(serp), "https://rukminim2.flixcart.com/image/p.jpeg");
   assert.equal(pickImage(parseGoogleCse({})), null);
-});
-
-test("email sender strings split into Brevo's name/email shape", () => {
-  assert.deepEqual(parseSender("PricePulse India <login@pricepulse.in>"), { name: "PricePulse India", email: "login@pricepulse.in" });
-  assert.deepEqual(parseSender('"PricePulse" <me@gmail.com>'), { name: "PricePulse", email: "me@gmail.com" });
-  assert.deepEqual(parseSender("me@gmail.com"), { email: "me@gmail.com" });
 });

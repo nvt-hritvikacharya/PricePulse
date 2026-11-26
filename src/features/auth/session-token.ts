@@ -1,14 +1,17 @@
+import "server-only";
 /**
- * Edge-safe session token helpers (used by middleware AND node route handlers).
+ * Session token helpers (server only).
  *
  * The session cookie is a signed JWT with a *sliding* inactivity window:
  *   exp = lastActivity + SESSION_IDLE_MINUTES.
  * Any user interaction calls /api/auth/activity which re-issues the token, so a session
  * only expires after a full idle window with no interaction.
  */
+import { randomBytes } from "node:crypto";
 import { jwtVerify, SignJWT } from "jose";
+import { db } from "@/lib/db";
 
-export const SESSION_COOKIE = "pp_session";
+export { SESSION_COOKIE } from "./cookie";
 
 export interface SessionClaims {
   sid: string;
@@ -23,30 +26,30 @@ export function idleSeconds(): number {
   return Math.max(60, Math.round(minutes * 60));
 }
 
+const SIGNING_KEY = "session_signing_key";
 let secretKey: Promise<Uint8Array> | undefined;
 
 /**
- * HMAC key for session tokens: SESSION_SECRET when set, otherwise derived from the
- * (secret, host-supplied) DATABASE_URL so a deployment without SESSION_SECRET still gets a private key.
+ * HMAC key for session tokens: SESSION_SECRET when set, otherwise a random 256-bit key that is
+ * generated once and kept in the `app_secrets` table (shared by every instance of the app).
  */
 export function secret(): Promise<Uint8Array> {
-  secretKey ??= deriveSecret().catch((error: unknown) => {
+  secretKey ??= loadSecret().catch((error: unknown) => {
     secretKey = undefined;
     throw error;
   });
   return secretKey;
 }
 
-async function deriveSecret(): Promise<Uint8Array> {
+async function loadSecret(): Promise<Uint8Array> {
   const explicit = process.env.SESSION_SECRET?.trim();
   if (explicit) {
     if (explicit.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
     return new TextEncoder().encode(explicit);
   }
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (!databaseUrl) throw new Error("Set SESSION_SECRET (or DATABASE_URL) to sign sessions");
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`pricepulse-session-v1\n${databaseUrl}`));
-  return new Uint8Array(digest);
+  await db.appSecret.createMany({ data: [{ name: SIGNING_KEY, value: randomBytes(32).toString("base64") }], skipDuplicates: true });
+  const row = await db.appSecret.findUniqueOrThrow({ where: { name: SIGNING_KEY } });
+  return new Uint8Array(Buffer.from(row.value, "base64"));
 }
 
 export async function signSession(claims: Omit<SessionClaims, "act">, now = Math.floor(Date.now() / 1000)) {

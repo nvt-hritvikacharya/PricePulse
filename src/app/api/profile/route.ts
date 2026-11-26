@@ -2,6 +2,7 @@ import { z } from "zod";
 import { handler, HttpError, json } from "@/lib/api";
 import { db } from "@/lib/db";
 import { requireUser } from "@/features/auth/server/session";
+import { assertCurrentSecret, credentialKind } from "@/server/auth/accounts";
 import { dateOfBirth, GENDERS, indianPhone } from "@/features/auth/schemas";
 
 const MAX_AVATAR_BYTES = 400_000;
@@ -13,6 +14,8 @@ const patchSchema = z.object({
   dateOfBirth: dateOfBirth.optional().or(z.literal("")),
   gender: z.enum(GENDERS).optional().or(z.literal("")),
   theme: z.enum(["light", "dark", "system"]).optional(),
+  /** Required to change the email or mobile number (they are sign-in identifiers). */
+  currentSecret: z.string().max(128).optional(),
   /** Small (client-resized) data URL, or an https URL (e.g. Google avatar / Supabase Storage). */
   avatarUrl: z
     .string()
@@ -42,6 +45,8 @@ export const GET = handler(async () => {
       role: user.role,
       theme: user.theme,
       authMethod: user.authMethod,
+      credential: credentialKind(user),
+      hasPassword: Boolean(user.passwordHash),
       createdAt: user.createdAt,
       counts: user._count,
     },
@@ -50,10 +55,18 @@ export const GET = handler(async () => {
 
 export const PATCH = handler(async (req: Request) => {
   const me = await requireUser();
-  const data = patchSchema.parse(await req.json());
+  const { currentSecret, ...data } = patchSchema.parse(await req.json());
   const current = await db.user.findUniqueOrThrow({ where: { id: me.id }, select: { email: true, phone: true } });
   const email = data.email === "" ? null : data.email;
   const phone = data.phone === "" ? null : data.phone;
+  const changesEmail = email !== undefined && email !== current.email;
+  const changesPhone = phone !== undefined && phone !== current.phone;
+  if (changesEmail || changesPhone) {
+    await assertCurrentSecret(me.id, currentSecret);
+    if (!(email === undefined ? current.email : email) && !(phone === undefined ? current.phone : phone)) {
+      throw new HttpError(400, "Keep an email or a mobile number to sign in with", "identifier_required");
+    }
+  }
   try {
     await db.user.update({
       where: { id: me.id },
@@ -64,9 +77,6 @@ export const PATCH = handler(async (req: Request) => {
         dateOfBirth: data.dateOfBirth === undefined ? undefined : data.dateOfBirth === "" ? null : new Date(`${data.dateOfBirth}T00:00:00Z`),
         gender: data.gender === "" ? null : data.gender,
         avatarUrl: data.avatarUrl === "" ? null : data.avatarUrl,
-        // A changed identifier is unverified until a code sent to it is used.
-        ...(email !== undefined && email !== current.email ? { emailVerifiedAt: null } : {}),
-        ...(phone !== undefined && phone !== current.phone ? { phoneVerifiedAt: null } : {}),
       },
     });
   } catch (err) {

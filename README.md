@@ -36,12 +36,14 @@ npm run db:seed                 # demo catalogue, 90-day history, users, sample 
 npm run dev                     # http://localhost:3000
 ```
 
-**Sign up / sign in (local):** open the app and use **Sign up** to create a profile (name, mobile, email, date of birth, gender), or **Sign in** with an existing account's email or mobile. Without an email/SMS provider configured, a *Developer mode* banner appears and each one-time code is printed in the server console (`[otp] email code for …`). This console fallback never runs in production.
+**Sign up / sign in:** open the app and use **Sign up** with an email ID and password, or a mobile number and a 6-digit passcode (plus name, date of birth and gender). **Sign in** uses the same email + password or mobile + passcode.
 
 | Seeded account | Role | Notes |
 |---|---|---|
-| `admin@pricepulse.dev` | ADMIN | Can open `/admin`. Any email or phone listed in `ADMIN_EMAILS` gets ADMIN once verified by OTP |
-| `demo@pricepulse.dev` / `9876543210` | USER | Has a wishlist, alerts and recently viewed items |
+| `admin@pricepulse.dev` | ADMIN | Sample data only (no password, so it can't sign in) |
+| `demo@pricepulse.dev` / `9876543210` | USER | Sample wishlist, alerts and recently viewed items (no password) |
+
+To open `/admin`, sign up normally and then run `npm run admin:grant -- you@example.com` (or a mobile number). `npm run admin:revoke -- …` removes it. Admin rights never come from an email or phone number, because sign-up doesn't prove you own either.
 
 ## Quick start (Docker)
 
@@ -58,16 +60,13 @@ Compose starts the following services:
 - **app**, the Next.js standalone server with a health check on `/api/health`
 - **alerts-cron**, which calls `/api/cron/check-alerts` every 30 minutes
 
-Set `RESEND_API_KEY` (or `SMTP_URL`) and/or the Twilio Verify keys in `.env` so the production container can send sign-in codes.
-
 `NEXT_PUBLIC_*` variables are inlined at build time. Compose passes them as build args from your `.env`, so rebuild after changing them.
 
 ## What works without keys / what needs keys
 
 | Feature | Without keys | Needs |
 |---|---|---|
-| Sign up / sign in by email code | Development: code printed in the server console. Production: unavailable | `BREVO_API_KEY` or `RESEND_API_KEY`, plus `OTP_EMAIL_FROM` (or `SMTP_URL`) |
-| Sign up / sign in by SMS code | Development: code printed in the server console. Production: unavailable | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` |
+| Sign up / sign in (email + password, mobile + passcode) | Works | — |
 | Google login | Hidden | Supabase keys + Google provider enabled in Supabase + `ENABLE_GOOGLE_AUTH=true` |
 | Real product photos | Generated artwork | `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID`, or `SERPAPI_API_KEY` |
 | Search, comparison, sorting, filters | Mock provider (labelled demo data) | Any provider key below for live prices |
@@ -85,7 +84,7 @@ Set `RESEND_API_KEY` (or `SMTP_URL`) and/or the Twilio Verify keys in `.env` so 
 ```
 src/
 ├─ app/                         # Next.js App Router
-│  ├─ (auth)/login              # first screen – OTP / Google sign-in
+│  ├─ (auth)/login              # first screen – sign up / sign in (password or passcode; optional Google)
 │  ├─ (app)/                    # authenticated shell (header, session guard)
 │  │  ├─ home, search, product/[slug], alerts, wishlist, profile
 │  │  └─ admin/                 # dashboard, users, searches, products, health, logs
@@ -160,15 +159,13 @@ None of these retailers offers an open public price API, and **this project does
 
 ## Authentication & sessions
 
-- **Sign up** collects name, mobile number, email ID, date of birth (13+) and gender, checks that the email and mobile aren't already registered, and verifies one of them with a one-time code before the `users` row is created. **Sign in** sends a code to an existing account's email or mobile. Indian numbers are normalised to `+91XXXXXXXXXX`.
-- **OTP delivery** (`src/server/auth/otp.ts`):
-  - **Email (the default):** the app generates a 6-digit code, stores only its HMAC in `otp_challenges`, and sends it through one of these free-tier services:
-    - [Brevo](https://www.brevo.com) (`BREVO_API_KEY`). The `OTP_EMAIL_FROM` sender can be a single verified address, so no domain is needed.
-    - [Resend](https://resend.com) (`RESEND_API_KEY`). The `OTP_EMAIL_FROM` sender must be on a domain verified in Resend.
-    - Any SMTP server (`SMTP_URL`).
-  - **SMS (optional):** the Mobile option appears on the login screen only when this is configured. [Twilio Verify](https://www.twilio.com/docs/verify) (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`) generates, sends and checks the code. Twilio handles the India DLT template registration that plain SMS needs.
-  - Codes expire after 10 minutes, allow 5 attempts, and requesting a new code voids the old one. Send and verify are also rate-limited per IP and per target.
-- **Google sign-in** is optional, through Supabase OAuth (PKCE via `/auth/callback`; `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH=true`).
+- **Sign up** takes an email ID + password (8+ characters, with a letter and a number) or a mobile number + 6-digit passcode, plus name, date of birth (13+) and gender. The other identifier is optional. **Sign in** uses the same credentials; an account with both an email and a mobile can sign in with either. Indian numbers are normalised to `+91XXXXXXXXXX`.
+- Passwords and passcodes are stored as salted **scrypt** hashes (`src/lib/passwords.ts`). Five wrong attempts lock the account for 15 minutes, and sign-up and sign-in are also rate-limited per IP and per identifier.
+- Changing the email or mobile in **Profile** requires the current password or passcode. **Profile → Change password/passcode** signs out the account's other sessions.
+- **Admin rights** are granted only with `npm run admin:grant` and removed with `npm run admin:revoke`. The role is read from the database on every request, so revoking takes effect immediately.
+- Sessions are signed with `SESSION_SECRET` if set, otherwise with a random 256-bit key generated once and stored in the `app_secrets` table.
+- Middleware refuses cross-site state-changing API requests (`Sec-Fetch-Site` / `Origin` check). The post-login `next` redirect only accepts paths on this site.
+- **Google sign-in** is optional, through Supabase OAuth (PKCE via `/auth/callback`; `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH=true`). It never takes over an existing password account with the same email.
 - **Every login is recorded** as a row in the `sessions` table: user, sign-in method, device (user agent), IP, start time, last activity, and how it ended (logout or idle timeout). Users see their own history under **Profile → Login sessions** and can sign out other devices. Admins see all sessions under **Admin → Sessions**. The session cookie is an httpOnly HS256 JWT bound to that row, so sessions can be revoked.
 - **30-minute inactivity timeout:** the token's `exp` is `lastActivity + SESSION_IDLE_MINUTES` (default 30).
   - Interactions (pointer, key, scroll, touch) are throttled to one call every 30 s to `POST /api/auth/activity`. That call slides the window forward in both the cookie and the DB.
@@ -255,13 +252,12 @@ The repo is set up for Cursor's app hosting:
 - `cursor-app.json` asks the host for a Postgres database; the host sets `DATABASE_URL` for build and runtime.
 - `npm run build` ends with `scripts/deploy-db.mjs`, which runs `prisma migrate deploy` and the idempotent seed against that database (skipped when `DATABASE_URL` is unset; set `SKIP_SEED=true` to skip only the seed).
 - Redis is optional. Without `REDIS_URL` the cache and rate limiter are in-process (per instance).
-- Sign-in codes need `BREVO_API_KEY` or `RESEND_API_KEY` plus `OTP_EMAIL_FROM` (email), and optionally the three `TWILIO_*` keys (SMS). Until at least one is set, the login screen says codes can't be sent yet.
-- Secrets (OTP providers, image search, price-provider keys, `LLM_API_KEY`, `SMTP_URL`, VAPID, `CRON_SECRET`, `SESSION_SECRET`, optional Supabase for Google) are set as app secrets on the host. Use the runtime names `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH` and `VAPID_PUBLIC_KEY`, since `NEXT_PUBLIC_*` values are inlined at build time.
+- Secrets (image search, price-provider keys, `LLM_API_KEY`, `SMTP_URL`, VAPID, `CRON_SECRET`, `SESSION_SECRET`, optional Supabase for Google) are set as app secrets on the host. Use the runtime names `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH` and `VAPID_PUBLIC_KEY`, since `NEXT_PUBLIC_*` values are inlined at build time.
 
 ## Production checklist
 
 - [ ] Set a strong `SESSION_SECRET` (≥ 32 chars) and a strong `CRON_SECRET`.
-- [ ] Configure email OTP delivery: Brevo (`BREVO_API_KEY`) or Resend (`RESEND_API_KEY`) with a verified `OTP_EMAIL_FROM`. Optionally add SMS with a Twilio Verify service (`TWILIO_*`).
+- [ ] Grant yourself admin with `npm run admin:grant -- <your email>` (against the production `DATABASE_URL`).
 - [ ] Optional: Supabase Google OAuth with redirect URL `https://<your-domain>/auth/callback`.
 - [ ] Optional: `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` or `SERPAPI_API_KEY` for product photos.
 - [ ] Add at least one price-provider key and set `MOCK_PROVIDER=never` to hide demo data.

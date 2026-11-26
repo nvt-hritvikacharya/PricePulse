@@ -2,39 +2,40 @@ import "server-only";
 import type { User } from "@prisma/client";
 import { db } from "@/lib/db";
 import { HttpError } from "@/lib/api";
-import { adminIdentifiers } from "@/lib/env";
-import type { SignupProfile } from "@/features/auth/schemas";
-import type { OtpChannel } from "./otp";
+import { hashSecret, verifySecret } from "@/lib/passwords";
+import type { SignupInput } from "@/features/auth/schemas";
 
-export const findUserByIdentifier = (channel: OtpChannel, target: string) =>
-  channel === "email" ? db.user.findUnique({ where: { email: target } }) : db.user.findUnique({ where: { phone: target } });
+/**
+ * Email + password / mobile + passcode accounts. Nothing here proves who owns an email or phone
+ * number, so no identifier ever grants a role: ADMIN is set only with `npm run admin:grant`.
+ */
+export type SigninMethod = "email" | "phone";
 
-/** Sign-up pre-check: neither identifier may belong to an existing account. */
-export async function assertIdentifiersFree(email: string, phone: string) {
-  const taken = await db.user.findFirst({ where: { OR: [{ email }, { phone }] }, select: { email: true } });
+const MAX_FAILURES = 5;
+const LOCK_MS = 15 * 60_000;
+
+export const credentialKind = (user: Pick<User, "authMethod">) => (user.authMethod === "PHONE_PASSCODE" ? "passcode" : "password");
+
+export async function createAccount(input: SignupInput): Promise<User> {
+  const taken = await db.user.findFirst({
+    where: { OR: [...(input.email ? [{ email: input.email }] : []), ...(input.phone ? [{ phone: input.phone }] : [])] },
+    select: { email: true },
+  });
   if (taken) {
-    const which = taken.email === email ? "email" : "mobile number";
+    const which = input.email && taken.email === input.email ? "email" : "mobile number";
     throw new HttpError(409, `An account with this ${which} already exists. Sign in instead.`, "account_exists");
   }
-}
-
-/** Creates the profile after the code sent to `verified` was confirmed. */
-export async function createAccount(profile: SignupProfile, verified: OtpChannel): Promise<User> {
   const now = new Date();
-  // Only an identifier the user just proved they own can match ADMIN_EMAILS.
-  const isAdmin = adminIdentifiers.has(verified === "email" ? profile.email : profile.phone);
   try {
     return await db.user.create({
       data: {
-        name: profile.name,
-        email: profile.email,
-        phone: profile.phone,
-        dateOfBirth: new Date(`${profile.dateOfBirth}T00:00:00Z`),
-        gender: profile.gender,
-        authMethod: verified === "email" ? "EMAIL_OTP" : "PHONE_OTP",
-        role: isAdmin ? "ADMIN" : "USER",
-        emailVerifiedAt: verified === "email" ? now : null,
-        phoneVerifiedAt: verified === "phone" ? now : null,
+        name: input.name,
+        email: input.email ?? null,
+        phone: input.phone ?? null,
+        dateOfBirth: new Date(`${input.dateOfBirth}T00:00:00Z`),
+        gender: input.gender,
+        authMethod: input.method === "email" ? "EMAIL_PASSWORD" : "PHONE_PASSCODE",
+        passwordHash: await hashSecret(input.secret),
         lastLoginAt: now,
         lastActiveAt: now,
         notificationPreference: { create: {} },
@@ -48,18 +49,34 @@ export async function createAccount(profile: SignupProfile, verified: OtpChannel
   }
 }
 
-/** Marks the identifier verified and records the login on an existing account. */
-export async function recordSignIn(user: User, channel: OtpChannel): Promise<User> {
+/** Checks the password/passcode; 5 wrong tries lock the account for 15 minutes. */
+export async function authenticate(method: SigninMethod, identifier: string, secret: string): Promise<User> {
+  const user = method === "email" ? await db.user.findUnique({ where: { email: identifier } }) : await db.user.findUnique({ where: { phone: identifier } });
+  const wrong = new HttpError(401, method === "email" ? "Incorrect email or password." : "Incorrect mobile number or passcode.", "invalid_credentials");
+
+  if (user?.lockedUntil && user.lockedUntil > new Date()) {
+    throw new HttpError(429, "Too many wrong attempts. Try again in 15 minutes.", "account_locked");
+  }
+  const ok = await verifySecret(secret, user?.passwordHash);
+  if (!user || !ok) {
+    if (user) {
+      const failures = user.failedLoginCount + 1;
+      await db.user.update({
+        where: { id: user.id },
+        data: failures >= MAX_FAILURES ? { failedLoginCount: 0, lockedUntil: new Date(Date.now() + LOCK_MS) } : { failedLoginCount: failures },
+      });
+    }
+    throw wrong;
+  }
   const now = new Date();
-  const identifier = channel === "email" ? user.email : user.phone;
-  return db.user.update({
-    where: { id: user.id },
-    data: {
-      lastLoginAt: now,
-      lastActiveAt: now,
-      ...(channel === "email" && !user.emailVerifiedAt ? { emailVerifiedAt: now } : {}),
-      ...(channel === "phone" && !user.phoneVerifiedAt ? { phoneVerifiedAt: now } : {}),
-      ...(identifier && adminIdentifiers.has(identifier.toLowerCase()) ? { role: "ADMIN" as const } : {}),
-    },
-  });
+  return db.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: now, lastActiveAt: now } });
+}
+
+/** Re-authentication for sensitive changes (identifier or secret). */
+export async function assertCurrentSecret(userId: string, secret: string | undefined) {
+  const user = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { passwordHash: true, authMethod: true } });
+  if (!user.passwordHash) throw new HttpError(400, "This account has no password yet.", "no_password");
+  if (!secret || !(await verifySecret(secret, user.passwordHash))) {
+    throw new HttpError(403, `Your current ${credentialKind(user)} is incorrect.`, "invalid_credentials");
+  }
 }

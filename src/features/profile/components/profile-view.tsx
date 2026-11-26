@@ -20,6 +20,7 @@ import { ProductMiniCard, type MiniProduct } from "@/features/products/component
 import { GENDER_LABELS, GENDERS } from "@/features/auth/schemas";
 import { enablePush, pushSupported } from "../push";
 import { LoginSessionsCard } from "./login-sessions-card";
+import { ChangeSecretCard } from "./change-secret-card";
 
 interface Profile {
   id: string;
@@ -32,6 +33,8 @@ interface Profile {
   role: string;
   theme: string;
   authMethod: string;
+  credential: "password" | "passcode";
+  hasPassword: boolean;
   createdAt: string;
   counts: { priceAlerts: number; wishlist: number; favorites: number; recentlyViewed: number; searchHistory: number };
 }
@@ -79,12 +82,12 @@ export function ProfileView({ idleMinutes }: { idleMinutes: number }) {
   const prefsQ = useQuery({ queryKey: ["prefs"], queryFn: () => api<{ preferences: Prefs; capabilities: { email: boolean; push: boolean }; vapidPublicKey: string | null }>("/api/notifications/preferences") });
   const viewed = useQuery({ queryKey: ["recently-viewed"], queryFn: () => api<{ items: { viewedAt: string; product: MiniProduct }[] }>("/api/recently-viewed") });
 
-  const [form, setForm] = useState({ name: "", email: "", phone: "", dateOfBirth: "", gender: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", dateOfBirth: "", gender: "", currentSecret: "" });
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   useEffect(() => {
     if (profile.data) {
       const p = profile.data.user;
-      setForm({ name: p.name ?? "", email: p.email ?? "", phone: p.phone?.replace(/^\+91/, "") ?? "", dateOfBirth: p.dateOfBirth?.slice(0, 10) ?? "", gender: p.gender ?? "" });
+      setForm({ name: p.name ?? "", email: p.email ?? "", phone: p.phone?.replace(/^\+91/, "") ?? "", dateOfBirth: p.dateOfBirth?.slice(0, 10) ?? "", gender: p.gender ?? "", currentSecret: "" });
     }
   }, [profile.data]);
   useEffect(() => {
@@ -135,6 +138,8 @@ export function ProfileView({ idleMinutes }: { idleMinutes: number }) {
   const u = profile.data?.user;
   if (profile.isLoading || !u) return <div className="space-y-4"><Skeleton className="h-40 rounded-3xl" /><Skeleton className="h-72 rounded-3xl" /></div>;
   const initials = (u.name ?? u.email ?? "U").slice(0, 2).toUpperCase();
+  const phoneDigits = (v: string) => v.replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "");
+  const identifierChanged = form.email.trim().toLowerCase() !== (u.email ?? "") || phoneDigits(form.phone) !== phoneDigits(u.phone ?? "");
 
   return (
     <div className="space-y-8">
@@ -175,7 +180,7 @@ export function ProfileView({ idleMinutes }: { idleMinutes: number }) {
             <CardDescription>Used for alerts and account recovery.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate({ name: form.name, email: form.email, phone: form.phone, dateOfBirth: form.dateOfBirth, gender: form.gender }); }}>
+            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate({ name: form.name, email: form.email, phone: form.phone, dateOfBirth: form.dateOfBirth, gender: form.gender, ...(identifierChanged ? { currentSecret: form.currentSecret } : {}) }); }}>
               <div className="space-y-2">
                 <Label htmlFor="p-name">Full name</Label>
                 <Input id="p-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="name" />
@@ -188,6 +193,12 @@ export function ProfileView({ idleMinutes }: { idleMinutes: number }) {
                 <Label htmlFor="p-phone">Mobile (+91)</Label>
                 <Input id="p-phone" type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} autoComplete="tel-national" />
               </div>
+              {identifierChanged && u.hasPassword && (
+                <div className="space-y-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
+                  <Label htmlFor="p-current">Current {u.credential} <span className="font-normal text-muted-foreground">(needed to change your email or mobile)</span></Label>
+                  <Input id="p-current" type="password" autoComplete="current-password" value={form.currentSecret} onChange={(e) => setForm({ ...form, currentSecret: e.target.value })} />
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="p-dob">Date of birth</Label>
@@ -252,6 +263,8 @@ export function ProfileView({ idleMinutes }: { idleMinutes: number }) {
           </Card>
         </div>
       </div>
+
+      {u.hasPassword && <ChangeSecretCard kind={u.credential} />}
 
       <LoginSessionsCard idleMinutes={idleMinutes} />
 

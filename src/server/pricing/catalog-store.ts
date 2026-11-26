@@ -27,7 +27,7 @@ export function toOfferDTO(offer: Offer, product: Pick<Product, "id" | "slug" | 
     imageUrl: isPlaceholderImage(product.imageUrl) ? (offer.imageUrl ?? product.imageUrl) : product.imageUrl,
     retailer: offer.retailer as RetailerId,
     providerId: offer.providerId,
-    url: offer.url,
+    url: /^https?:\/\//i.test(offer.url) ? offer.url : "#",
     price,
     mrp,
     discountPercent: discountPercent(price, mrp),

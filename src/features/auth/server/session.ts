@@ -2,7 +2,6 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import type { AuthMethod, User } from "@prisma/client";
 import { db } from "@/lib/db";
-import { adminIdentifiers } from "@/lib/env";
 import { HttpError } from "@/lib/api";
 import { logger } from "@/lib/logger";
 import { SESSION_COOKIE, idleSeconds, sessionCookieOptions, signSession, verifySession } from "../session-token";
@@ -33,7 +32,6 @@ export interface IdentityInput {
 export async function upsertUser(identity: IdentityInput): Promise<User> {
   const email = identity.email?.toLowerCase() || null;
   const phone = identity.phone || null;
-  const isAdmin = (email && adminIdentifiers.has(email)) || (phone && adminIdentifiers.has(phone));
 
   const existing = await db.user.findFirst({
     where: {
@@ -54,7 +52,6 @@ export async function upsertUser(identity: IdentityInput): Promise<User> {
         phone: existing.phone ?? phone,
         name: existing.name ?? identity.name ?? undefined,
         avatarUrl: existing.avatarUrl ?? identity.avatarUrl ?? undefined,
-        role: isAdmin ? "ADMIN" : existing.role,
         lastLoginAt: new Date(),
         lastActiveAt: new Date(),
       },
@@ -69,7 +66,6 @@ export async function upsertUser(identity: IdentityInput): Promise<User> {
       name: identity.name ?? (email ? email.split("@")[0] : null),
       avatarUrl: identity.avatarUrl ?? undefined,
       authMethod: identity.method,
-      role: isAdmin ? "ADMIN" : "USER",
       lastLoginAt: new Date(),
       lastActiveAt: new Date(),
       notificationPreference: { create: {} },
