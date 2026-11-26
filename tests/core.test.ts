@@ -6,6 +6,7 @@ import { MOCK_CATALOG } from "../src/server/providers/mock/catalog";
 import { matchRetailer, retailerSearchQuery, retailerSearchUrl } from "../src/features/retailers/retailers";
 import { sendOtpSchema, signupProfileSchema } from "../src/features/auth/schemas";
 import { parseGoogleCse, parseSerpApiImages, pickImage } from "../src/server/images/image-search";
+import { parseSender } from "../src/server/auth/mail-address";
 import { discountPercent, formatINR } from "../src/lib/utils";
 import type { ProviderOffer } from "../src/server/providers/types";
 
@@ -93,4 +94,10 @@ test("image search prefers large https photos from retailer CDNs", () => {
   const serp = parseSerpApiImages({ images_results: [{ original: "https://x.example/logo.svg" }, { original: "https://rukminim2.flixcart.com/image/p.jpeg", original_width: 600, original_height: 600 }] });
   assert.equal(pickImage(serp), "https://rukminim2.flixcart.com/image/p.jpeg");
   assert.equal(pickImage(parseGoogleCse({})), null);
+});
+
+test("email sender strings split into Brevo's name/email shape", () => {
+  assert.deepEqual(parseSender("PricePulse India <login@pricepulse.in>"), { name: "PricePulse India", email: "login@pricepulse.in" });
+  assert.deepEqual(parseSender('"PricePulse" <me@gmail.com>'), { name: "PricePulse", email: "me@gmail.com" });
+  assert.deepEqual(parseSender("me@gmail.com"), { email: "me@gmail.com" });
 });

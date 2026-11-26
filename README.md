@@ -66,7 +66,7 @@ Set `RESEND_API_KEY` (or `SMTP_URL`) and/or the Twilio Verify keys in `.env` so 
 
 | Feature | Without keys | Needs |
 |---|---|---|
-| Sign up / sign in by email code | Development: code printed in the server console. Production: unavailable | `RESEND_API_KEY` + `OTP_EMAIL_FROM` (or `SMTP_URL`) |
+| Sign up / sign in by email code | Development: code printed in the server console. Production: unavailable | `BREVO_API_KEY` or `RESEND_API_KEY`, plus `OTP_EMAIL_FROM` (or `SMTP_URL`) |
 | Sign up / sign in by SMS code | Development: code printed in the server console. Production: unavailable | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` |
 | Google login | Hidden | Supabase keys + Google provider enabled in Supabase + `ENABLE_GOOGLE_AUTH=true` |
 | Real product photos | Generated artwork | `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID`, or `SERPAPI_API_KEY` |
@@ -162,8 +162,11 @@ None of these retailers offers an open public price API, and **this project does
 
 - **Sign up** collects name, mobile number, email ID, date of birth (13+) and gender, checks that the email and mobile aren't already registered, and verifies one of them with a one-time code before the `users` row is created. **Sign in** sends a code to an existing account's email or mobile. Indian numbers are normalised to `+91XXXXXXXXXX`.
 - **OTP delivery** (`src/server/auth/otp.ts`):
-  - **Email:** the app generates a 6-digit code, stores only its HMAC in `otp_challenges`, and sends it through [Resend](https://resend.com) (`RESEND_API_KEY`, sender `OTP_EMAIL_FROM` on a domain verified in Resend), or through any SMTP server (`SMTP_URL`).
-  - **SMS:** [Twilio Verify](https://www.twilio.com/docs/verify) (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`) generates, sends and checks the code. Twilio handles the India DLT template registration that plain SMS needs.
+  - **Email (the default):** the app generates a 6-digit code, stores only its HMAC in `otp_challenges`, and sends it through one of these free-tier services:
+    - [Brevo](https://www.brevo.com) (`BREVO_API_KEY`). The `OTP_EMAIL_FROM` sender can be a single verified address, so no domain is needed.
+    - [Resend](https://resend.com) (`RESEND_API_KEY`). The `OTP_EMAIL_FROM` sender must be on a domain verified in Resend.
+    - Any SMTP server (`SMTP_URL`).
+  - **SMS (optional):** the Mobile option appears on the login screen only when this is configured. [Twilio Verify](https://www.twilio.com/docs/verify) (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`) generates, sends and checks the code. Twilio handles the India DLT template registration that plain SMS needs.
   - Codes expire after 10 minutes, allow 5 attempts, and requesting a new code voids the old one. Send and verify are also rate-limited per IP and per target.
 - **Google sign-in** is optional, through Supabase OAuth (PKCE via `/auth/callback`; `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH=true`).
 - **Every login is recorded** as a row in the `sessions` table: user, sign-in method, device (user agent), IP, start time, last activity, and how it ended (logout or idle timeout). Users see their own history under **Profile → Login sessions** and can sign out other devices. Admins see all sessions under **Admin → Sessions**. The session cookie is an httpOnly HS256 JWT bound to that row, so sessions can be revoked.
@@ -252,13 +255,13 @@ The repo is set up for Cursor's app hosting:
 - `cursor-app.json` asks the host for a Postgres database; the host sets `DATABASE_URL` for build and runtime.
 - `npm run build` ends with `scripts/deploy-db.mjs`, which runs `prisma migrate deploy` and the idempotent seed against that database (skipped when `DATABASE_URL` is unset; set `SKIP_SEED=true` to skip only the seed).
 - Redis is optional. Without `REDIS_URL` the cache and rate limiter are in-process (per instance).
-- Sign-in codes need `RESEND_API_KEY` (email) and/or the three `TWILIO_*` keys (SMS). Until at least one is set, the login screen says codes can't be sent yet.
+- Sign-in codes need `BREVO_API_KEY` or `RESEND_API_KEY` plus `OTP_EMAIL_FROM` (email), and optionally the three `TWILIO_*` keys (SMS). Until at least one is set, the login screen says codes can't be sent yet.
 - Secrets (OTP providers, image search, price-provider keys, `LLM_API_KEY`, `SMTP_URL`, VAPID, `CRON_SECRET`, `SESSION_SECRET`, optional Supabase for Google) are set as app secrets on the host. Use the runtime names `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH` and `VAPID_PUBLIC_KEY`, since `NEXT_PUBLIC_*` values are inlined at build time.
 
 ## Production checklist
 
 - [ ] Set a strong `SESSION_SECRET` (≥ 32 chars) and a strong `CRON_SECRET`.
-- [ ] Configure OTP delivery: Resend with a verified sending domain (`RESEND_API_KEY`, `OTP_EMAIL_FROM`) and/or a Twilio Verify service (`TWILIO_*`).
+- [ ] Configure email OTP delivery: Brevo (`BREVO_API_KEY`) or Resend (`RESEND_API_KEY`) with a verified `OTP_EMAIL_FROM`. Optionally add SMS with a Twilio Verify service (`TWILIO_*`).
 - [ ] Optional: Supabase Google OAuth with redirect URL `https://<your-domain>/auth/callback`.
 - [ ] Optional: `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` or `SERPAPI_API_KEY` for product photos.
 - [ ] Add at least one price-provider key and set `MOCK_PROVIDER=never` to hide demo data.

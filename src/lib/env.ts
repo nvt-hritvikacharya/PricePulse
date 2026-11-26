@@ -19,8 +19,9 @@ const schema = z.object({
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   ENABLE_GOOGLE_AUTH: z.string().optional(),
-  // OTP delivery: email via Resend (or SMTP_URL), SMS via Twilio Verify.
+  // OTP delivery: email via Resend, Brevo (or SMTP_URL); SMS via Twilio Verify.
   RESEND_API_KEY: z.string().optional(),
+  BREVO_API_KEY: z.string().optional(),
   OTP_EMAIL_FROM: z.string().optional(),
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
@@ -67,13 +68,19 @@ export const isGoogleAuthEnabled =
 
 export const vapidPublicKey = env.VAPID_PUBLIC_KEY ?? env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
-export type EmailOtpProvider = "resend" | "smtp" | "log";
+export type EmailOtpProvider = "resend" | "brevo" | "smtp" | "log";
 export type SmsOtpProvider = "twilio_verify" | "log";
 
 /** "log" (code printed to the server console) exists only outside production. */
 const devLog = env.NODE_ENV !== "production" ? ("log" as const) : null;
 
-export const emailOtpProvider: EmailOtpProvider | null = env.RESEND_API_KEY ? "resend" : env.SMTP_URL ? "smtp" : devLog;
+export const emailOtpProvider: EmailOtpProvider | null = env.RESEND_API_KEY
+  ? "resend"
+  : env.BREVO_API_KEY
+    ? "brevo"
+    : env.SMTP_URL
+      ? "smtp"
+      : devLog;
 export const smsOtpProvider: SmsOtpProvider | null =
   env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID ? "twilio_verify" : devLog;
 

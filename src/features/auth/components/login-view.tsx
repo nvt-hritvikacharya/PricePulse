@@ -65,7 +65,9 @@ const selectClass =
 
 export function LoginView({ channels, devLog, google: googleConfig, reason, error, next, idleMinutes }: Props) {
   const router = useRouter();
-  const defaultChannel: Channel = channels.email || !channels.phone ? "email" : "phone";
+  const defaultChannel: Channel = !channels.email && channels.phone ? "phone" : "email";
+  /** Mobile codes are offered only when an SMS provider is connected. */
+  const showChannelChoice = channels.email && channels.phone;
   const [mode, setMode] = useState<Mode>("signin");
   const [step, setStep] = useState<"form" | "verify">("form");
   const [channel, setChannel] = useState<Channel>(defaultChannel);
@@ -152,22 +154,22 @@ export function LoginView({ channels, devLog, google: googleConfig, reason, erro
     });
   }
 
-  const channelTabs = (label: string) => (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <Tabs value={channel} onValueChange={(v) => { setChannel(v as Channel); setFormError(null); }}>
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="email"><Mail aria-hidden /> Email</TabsTrigger>
-          <TabsTrigger value="phone"><Smartphone aria-hidden /> Mobile</TabsTrigger>
-        </TabsList>
-      </Tabs>
-      {!channelReady && anyChannel && (
-        <p className="text-xs text-amber-700 dark:text-amber-300">
-          {channel === "email" ? "Email" : "SMS"} codes aren&apos;t available yet. Use {channel === "email" ? "your mobile number" : "email"} instead.
-        </p>
-      )}
-    </div>
-  );
+  const channelTabs = (label: string) =>
+    showChannelChoice ? (
+      <div className="space-y-2">
+        <Label>{label}</Label>
+        <Tabs value={channel} onValueChange={(v) => { setChannel(v as Channel); setFormError(null); }}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="email"><Mail aria-hidden /> Email</TabsTrigger>
+            <TabsTrigger value="phone"><Smartphone aria-hidden /> Mobile</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+    ) : mode === "signup" && channel === "email" && channels.email ? (
+      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Mail className="size-4" aria-hidden /> We&apos;ll email a 6-digit code to verify your email ID.
+      </p>
+    ) : null;
 
   const phoneInput = (id: string, value: string, onChange: (v: string) => void, autoFocus?: boolean) => (
     <div className="flex gap-2">

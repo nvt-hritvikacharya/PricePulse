@@ -101,7 +101,7 @@ model OtpChallenge {
   target     String
   /// "signin" | "signup"
   purpose    String
-  /// "resend" | "smtp" | "twilio_verify" | "log"
+  /// "resend" | "brevo" | "smtp" | "twilio_verify" | "log"
   provider   String
   /// HMAC of the code; null when the provider (Twilio Verify) holds the code.
   codeHash   String?

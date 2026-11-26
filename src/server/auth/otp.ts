@@ -6,10 +6,11 @@ import { HttpError } from "@/lib/api";
 import { emailOtpProvider, env, smsOtpProvider } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { secret } from "@/features/auth/session-token";
+import { parseSender } from "./mail-address";
 
 /**
  * One-time passwords for sign-in and sign-up.
- *  - Email: we generate the code, store only its HMAC, and send it via Resend (or SMTP).
+ *  - Email: we generate the code, store only its HMAC, and send it via Resend, Brevo or SMTP.
  *  - SMS: Twilio Verify generates, sends (DLT-compliant in India) and checks the code.
  * Codes expire after 10 minutes and allow 5 attempts; requesting a new code voids older ones.
  */
@@ -52,6 +53,7 @@ export async function sendOtp(channel: OtpChannel, target: string, purpose: OtpP
     }
     const mail = otpEmail(code, purpose);
     if (provider === "resend") await sendViaResend(target, mail);
+    else if (provider === "brevo") await sendViaBrevo(target, mail);
     else await sendViaSmtp(target, mail);
   } catch (err) {
     await db.otpChallenge.update({ where: { id: challenge.id }, data: { consumedAt: new Date() } });
@@ -121,6 +123,16 @@ async function sendViaResend(to: string, mail: { subject: string; text: string; 
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error(`Resend responded ${res.status}`);
+}
+
+async function sendViaBrevo(to: string, mail: { subject: string; text: string; html: string }) {
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: { "api-key": env.BREVO_API_KEY!, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ sender: parseSender(fromAddress()), to: [{ email: to }], subject: mail.subject, htmlContent: mail.html, textContent: mail.text }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`Brevo responded ${res.status}`);
 }
 
 let smtp: Transporter | null = null;
