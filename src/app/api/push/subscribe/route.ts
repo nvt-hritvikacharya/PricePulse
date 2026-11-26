@@ -3,8 +3,20 @@ import { handler, json } from "@/lib/api";
 import { db } from "@/lib/db";
 import { requireUser } from "@/features/auth/server/session";
 
+// The server POSTs to stored endpoints, so only accept the browser vendors' push services.
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /^updates\.push\.services\.mozilla\.com$/, /\.notify\.windows\.com$/, /^web\.push\.apple\.com$/, /\.push\.apple\.com$/];
+
+const isPushServiceUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.port && PUSH_HOSTS.some((re) => re.test(url.hostname));
+  } catch {
+    return false;
+  }
+};
+
 const schema = z.object({
-  endpoint: z.string().url(),
+  endpoint: z.string().max(1000).refine(isPushServiceUrl, "Unsupported push service"),
   keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }),
 });
 

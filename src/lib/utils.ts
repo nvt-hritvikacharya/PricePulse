@@ -52,3 +52,10 @@ export function timeAgo(date: Date | string): string {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
 }
+
+const istDateTime = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+
+/** e.g. "26 Nov, 9:42 pm" in India Standard Time. */
+export function formatDateTimeIST(date: Date | string): string {
+  return `${istDateTime.format(typeof date === "string" ? new Date(date) : date)} IST`;
+}

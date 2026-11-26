@@ -1,12 +1,13 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BarChart3, LayoutDashboard, Package, ScrollText, Users } from "lucide-react";
+import { Activity, BarChart3, KeyRound, LayoutDashboard, Package, ScrollText, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/sessions", label: "Sessions", icon: KeyRound },
   { href: "/admin/searches", label: "Searches", icon: BarChart3 },
   { href: "/admin/products", label: "Products", icon: Package },
   { href: "/admin/health", label: "API health", icon: Activity },

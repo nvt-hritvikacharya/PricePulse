@@ -1,12 +1,7 @@
 import "server-only";
-import { RETAILERS, RETAILER_IDS } from "@/features/retailers/retailers";
+import { RETAILER_IDS, retailerSearchUrl } from "@/features/retailers/retailers";
 import type { PriceProvider, ProviderOffer } from "../types";
 import { offerFor, retailersFor, searchCatalog, syntheticProducts } from "../mock/pricing";
-
-/** Builds the deterministic on-site URL that a real deep link would replace. */
-function demoUrl(retailer: keyof typeof RETAILERS, query: string) {
-  return `https://www.${RETAILERS[retailer].domain}/search?q=${encodeURIComponent(query)}`;
-}
 
 /**
  * Mock provider – clearly labelled demo data so the app is fully usable without API keys.
@@ -37,7 +32,7 @@ export const mockProvider: PriceProvider = {
           brand: product.brand,
           category: product.category,
           imageUrl: `/api/img/${product.key}`,
-          url: demoUrl(retailer, product.name),
+          url: retailerSearchUrl(retailer, product.name),
           price: o.price,
           mrp: o.mrp,
           deliveryCharge: o.deliveryCharge,

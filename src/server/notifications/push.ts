@@ -1,15 +1,15 @@
 import "server-only";
 import webpush from "web-push";
 import { db } from "@/lib/db";
-import { env } from "@/lib/env";
+import { env, vapidPublicKey } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
 let configured = false;
-export const isPushConfigured = () => Boolean(env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY);
+export const isPushConfigured = () => Boolean(vapidPublicKey && env.VAPID_PRIVATE_KEY);
 
 function ensureConfigured() {
   if (configured || !isPushConfigured()) return;
-  webpush.setVapidDetails(env.VAPID_SUBJECT, env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!, env.VAPID_PRIVATE_KEY!);
+  webpush.setVapidDetails(env.VAPID_SUBJECT, vapidPublicKey!, env.VAPID_PRIVATE_KEY!);
   configured = true;
 }
 

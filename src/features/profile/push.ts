@@ -9,9 +9,8 @@ function urlBase64ToUint8Array(base64: string) {
 export const pushSupported = () => typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
 /** Registers the service worker and subscribes this browser to Web Push. */
-export async function enablePush(): Promise<"enabled" | "denied" | "unsupported" | "unconfigured"> {
+export async function enablePush(key: string | null | undefined): Promise<"enabled" | "denied" | "unsupported" | "unconfigured"> {
   if (!pushSupported()) return "unsupported";
-  const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   if (!key) return "unconfigured";
   const permission = await Notification.requestPermission();
   if (permission !== "granted") return "denied";

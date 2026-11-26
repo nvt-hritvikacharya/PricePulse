@@ -14,8 +14,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   serverExternalPackages: ["ioredis", "web-push", "nodemailer"],
   images: {
-    // Retailer/aggregator CDNs vary per provider, so allow any https host.
-    remotePatterns: [{ protocol: "https", hostname: "**" }],
+    // Product photos come from many retailer CDNs; browsers load them directly instead of
+    // through Next's image proxy, so the server never fetches third-party URLs.
+    unoptimized: true,
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

@@ -8,6 +8,7 @@ import { mockHistory, productSlug } from "../providers/mock/pricing";
 import { buildReviewSummary } from "./review-summary";
 import type { ProviderOffer } from "../providers/types";
 import type { OfferGroup } from "./matcher";
+import { isPlaceholderImage } from "../images/image-search";
 
 const SNAPSHOT_MIN_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -23,10 +24,10 @@ export function toOfferDTO(offer: Offer, product: Pick<Product, "id" | "slug" | 
     title: offer.title,
     brand: product.brand,
     category: product.category,
-    imageUrl: offer.imageUrl ?? product.imageUrl,
+    imageUrl: isPlaceholderImage(product.imageUrl) ? (offer.imageUrl ?? product.imageUrl) : product.imageUrl,
     retailer: offer.retailer as RetailerId,
     providerId: offer.providerId,
-    url: offer.url,
+    url: /^https?:\/\//i.test(offer.url) ? offer.url : "#",
     price,
     mrp,
     discountPercent: discountPercent(price, mrp),

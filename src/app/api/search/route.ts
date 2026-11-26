@@ -15,6 +15,8 @@ export const GET = handler(async (req: Request) => {
   const params = schema.parse(Object.fromEntries(new URL(req.url).searchParams));
   const limit = await rateLimit(`search:${user.id}:${clientIp(req.headers)}`, 30, 60);
   if (!limit.ok) throw new HttpError(429, `Slow down! Try again in ${limit.resetSeconds}s.`, "rate_limited");
+  const daily = await rateLimit(`search-day:${user.id}`, 500, 86_400);
+  if (!daily.ok) throw new HttpError(429, "Daily search limit reached. Try again tomorrow.", "rate_limited");
   const data = await searchPrices(params.q, params.sort, user.id);
   return json(data, { headers: { "X-RateLimit-Remaining": String(limit.remaining) } });
 });

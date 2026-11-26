@@ -2,7 +2,6 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import type { AuthMethod, User } from "@prisma/client";
 import { db } from "@/lib/db";
-import { adminIdentifiers } from "@/lib/env";
 import { HttpError } from "@/lib/api";
 import { logger } from "@/lib/logger";
 import { SESSION_COOKIE, idleSeconds, sessionCookieOptions, signSession, verifySession } from "../session-token";
@@ -33,7 +32,6 @@ export interface IdentityInput {
 export async function upsertUser(identity: IdentityInput): Promise<User> {
   const email = identity.email?.toLowerCase() || null;
   const phone = identity.phone || null;
-  const isAdmin = (email && adminIdentifiers.has(email)) || (phone && adminIdentifiers.has(phone));
 
   const existing = await db.user.findFirst({
     where: {
@@ -54,7 +52,6 @@ export async function upsertUser(identity: IdentityInput): Promise<User> {
         phone: existing.phone ?? phone,
         name: existing.name ?? identity.name ?? undefined,
         avatarUrl: existing.avatarUrl ?? identity.avatarUrl ?? undefined,
-        role: isAdmin ? "ADMIN" : existing.role,
         lastLoginAt: new Date(),
         lastActiveAt: new Date(),
       },
@@ -69,7 +66,6 @@ export async function upsertUser(identity: IdentityInput): Promise<User> {
       name: identity.name ?? (email ? email.split("@")[0] : null),
       avatarUrl: identity.avatarUrl ?? undefined,
       authMethod: identity.method,
-      role: isAdmin ? "ADMIN" : "USER",
       lastLoginAt: new Date(),
       lastActiveAt: new Date(),
       notificationPreference: { create: {} },
@@ -77,12 +73,13 @@ export async function upsertUser(identity: IdentityInput): Promise<User> {
   });
 }
 
-/** Creates a DB session row and sets the signed cookie. */
-export async function startSession(user: User) {
+/** Creates a DB session row (the login record) and sets the signed cookie. */
+export async function startSession(user: User, method: AuthMethod) {
   const h = await headers();
   const session = await db.session.create({
     data: {
       userId: user.id,
+      method,
       expiresAt: new Date(Date.now() + idleSeconds() * 1000),
       userAgent: h.get("user-agent")?.slice(0, 300),
       ip: h.get("x-forwarded-for")?.split(",")[0] ?? null,
@@ -90,7 +87,7 @@ export async function startSession(user: User) {
   });
   const token = await signSession({ sid: session.id, uid: user.id, role: user.role });
   (await cookies()).set(SESSION_COOKIE, token, sessionCookieOptions());
-  logger.info("auth", "Session started", { userId: user.id, method: user.authMethod });
+  logger.info("auth", "Session started", { userId: user.id, method });
   return session;
 }
 

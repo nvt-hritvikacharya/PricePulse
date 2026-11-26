@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import type { OfferDTO } from "@/features/search/types";
 import type { RetailerId } from "@/features/retailers/retailers";
 import { toOfferDTO } from "./catalog-store";
+import { ensureProductImages } from "../images/product-images";
 import { sortOffers } from "./search-service";
 
 export interface ReviewSummary {
@@ -35,6 +36,8 @@ export async function getProduct(idOrSlug: string): Promise<ProductDetail | null
     include: { offers: true },
   });
   if (!product) return null;
+  const photo = (await ensureProductImages([product], { limit: 1 })).get(product.id);
+  if (photo) product.imageUrl = photo;
   const inStock = product.offers.filter((o) => o.availability !== "OUT_OF_STOCK");
   const cheapest = Math.min(...(inStock.length ? inStock : product.offers).map((o) => Number(o.price)));
   const offers = sortOffers(

@@ -17,17 +17,24 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ProductMiniCard, type MiniProduct } from "@/features/products/components/product-mini-card";
+import { GENDER_LABELS, GENDERS } from "@/features/auth/schemas";
 import { enablePush, pushSupported } from "../push";
+import { LoginSessionsCard } from "./login-sessions-card";
+import { ChangeSecretCard } from "./change-secret-card";
 
 interface Profile {
   id: string;
   name: string | null;
   email: string | null;
   phone: string | null;
+  dateOfBirth: string | null;
+  gender: string | null;
   avatarUrl: string | null;
   role: string;
   theme: string;
   authMethod: string;
+  credential: "password" | "passcode";
+  hasPassword: boolean;
   createdAt: string;
   counts: { priceAlerts: number; wishlist: number; favorites: number; recentlyViewed: number; searchHistory: number };
 }
@@ -66,19 +73,22 @@ function Stat({ icon: Icon, label, value, href }: { icon: typeof Bell; label: st
   );
 }
 
-export function ProfileView() {
+export function ProfileView({ idleMinutes }: { idleMinutes: number }) {
   const qc = useQueryClient();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const fileRef = useRef<HTMLInputElement>(null);
   const profile = useQuery({ queryKey: ["profile"], queryFn: () => api<{ user: Profile }>("/api/profile") });
-  const prefsQ = useQuery({ queryKey: ["prefs"], queryFn: () => api<{ preferences: Prefs; capabilities: { email: boolean; push: boolean } }>("/api/notifications/preferences") });
+  const prefsQ = useQuery({ queryKey: ["prefs"], queryFn: () => api<{ preferences: Prefs; capabilities: { email: boolean; push: boolean }; vapidPublicKey: string | null }>("/api/notifications/preferences") });
   const viewed = useQuery({ queryKey: ["recently-viewed"], queryFn: () => api<{ items: { viewedAt: string; product: MiniProduct }[] }>("/api/recently-viewed") });
 
-  const [form, setForm] = useState({ name: "", email: "", phone: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", dateOfBirth: "", gender: "", currentSecret: "" });
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   useEffect(() => {
-    if (profile.data) setForm({ name: profile.data.user.name ?? "", email: profile.data.user.email ?? "", phone: profile.data.user.phone?.replace(/^\+91/, "") ?? "" });
+    if (profile.data) {
+      const p = profile.data.user;
+      setForm({ name: p.name ?? "", email: p.email ?? "", phone: p.phone?.replace(/^\+91/, "") ?? "", dateOfBirth: p.dateOfBirth?.slice(0, 10) ?? "", gender: p.gender ?? "", currentSecret: "" });
+    }
   }, [profile.data]);
   useEffect(() => {
     if (prefsQ.data) setPrefs(prefsQ.data.preferences);
@@ -112,7 +122,7 @@ export function ProfileView() {
   }
 
   async function onEnablePush() {
-    const res = await enablePush().catch(() => "unsupported" as const);
+    const res = await enablePush(prefsQ.data?.vapidPublicKey).catch(() => "unsupported" as const);
     const msg = { enabled: "Push notifications enabled on this device", denied: "Permission denied in the browser", unsupported: "This browser doesn't support web push", unconfigured: "Web push isn't configured on the server (VAPID keys missing)" }[res];
     if (res === "enabled") toast.success(msg);
     else toast.error(msg);
@@ -128,6 +138,8 @@ export function ProfileView() {
   const u = profile.data?.user;
   if (profile.isLoading || !u) return <div className="space-y-4"><Skeleton className="h-40 rounded-3xl" /><Skeleton className="h-72 rounded-3xl" /></div>;
   const initials = (u.name ?? u.email ?? "U").slice(0, 2).toUpperCase();
+  const phoneDigits = (v: string) => v.replace(/\D/g, "").replace(/^91(?=\d{10}$)/, "");
+  const identifierChanged = form.email.trim().toLowerCase() !== (u.email ?? "") || phoneDigits(form.phone) !== phoneDigits(u.phone ?? "");
 
   return (
     <div className="space-y-8">
@@ -168,7 +180,7 @@ export function ProfileView() {
             <CardDescription>Used for alerts and account recovery.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate({ name: form.name, email: form.email, phone: form.phone }); }}>
+            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate({ name: form.name, email: form.email, phone: form.phone, dateOfBirth: form.dateOfBirth, gender: form.gender, ...(identifierChanged ? { currentSecret: form.currentSecret } : {}) }); }}>
               <div className="space-y-2">
                 <Label htmlFor="p-name">Full name</Label>
                 <Input id="p-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoComplete="name" />
@@ -180,6 +192,25 @@ export function ProfileView() {
               <div className="space-y-2">
                 <Label htmlFor="p-phone">Mobile (+91)</Label>
                 <Input id="p-phone" type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} autoComplete="tel-national" />
+              </div>
+              {identifierChanged && u.hasPassword && (
+                <div className="space-y-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
+                  <Label htmlFor="p-current">Current {u.credential} <span className="font-normal text-muted-foreground">(needed to change your email or mobile)</span></Label>
+                  <Input id="p-current" type="password" autoComplete="current-password" value={form.currentSecret} onChange={(e) => setForm({ ...form, currentSecret: e.target.value })} />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="p-dob">Date of birth</Label>
+                  <Input id="p-dob" type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} autoComplete="bday" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="p-gender">Gender</Label>
+                  <select id="p-gender" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} className="h-11 w-full rounded-xl border border-input bg-background/70 px-3 text-sm shadow-xs outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40">
+                    <option value="">Not set</option>
+                    {GENDERS.map((g) => <option key={g} value={g}>{GENDER_LABELS[g]}</option>)}
+                  </select>
+                </div>
               </div>
               <Button type="submit" disabled={save.isPending}>{save.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save />} Save changes</Button>
             </form>
@@ -232,6 +263,10 @@ export function ProfileView() {
           </Card>
         </div>
       </div>
+
+      {u.hasPassword && <ChangeSecretCard kind={u.credential} />}
+
+      <LoginSessionsCard idleMinutes={idleMinutes} />
 
       <section id="viewed" aria-labelledby="viewed-h" className="space-y-4">
         <div className="flex items-center justify-between">

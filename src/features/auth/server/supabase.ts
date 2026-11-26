@@ -1,7 +1,7 @@
 import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { env } from "@/lib/env";
+import { supabaseAnonKey, supabaseUrl } from "@/lib/env";
 
 /**
  * Supabase server client bound to the request cookies (needed for the PKCE OAuth flow).
@@ -9,7 +9,7 @@ import { env } from "@/lib/env";
  */
 export async function createSupabaseServerClient() {
   const jar = await cookies();
-  return createServerClient(env.NEXT_PUBLIC_SUPABASE_URL!, env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+  return createServerClient(supabaseUrl!, supabaseAnonKey!, {
     cookies: {
       getAll: () => jar.getAll(),
       setAll: (list) => {

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/features/auth/server/session";
 import { isEmailConfigured } from "@/server/notifications/email";
 import { isPushConfigured } from "@/server/notifications/push";
+import { vapidPublicKey } from "@/lib/env";
 
 const schema = z.object({
   emailAlerts: z.boolean(),
@@ -16,7 +17,7 @@ const schema = z.object({
 export const GET = handler(async () => {
   const user = await requireUser();
   const prefs = await db.notificationPreference.upsert({ where: { userId: user.id }, create: { userId: user.id }, update: {} });
-  return json({ preferences: prefs, capabilities: { email: isEmailConfigured(), push: isPushConfigured() } });
+  return json({ preferences: prefs, capabilities: { email: isEmailConfigured(), push: isPushConfigured() }, vapidPublicKey: isPushConfigured() ? vapidPublicKey : null });
 });
 
 export const PUT = handler(async (req: Request) => {

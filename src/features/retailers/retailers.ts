@@ -48,3 +48,29 @@ export function matchRetailer(source: string | undefined | null): RetailerId | u
   ];
   return rules.find(([re]) => re.test(s))?.[1];
 }
+
+/** Shortens a catalogue title to what shoppers type ("Apple iPhone 16 (128 GB) – Ultramarine" → "Apple iPhone 16 128 GB"). */
+export function retailerSearchQuery(productName: string): string {
+  return productName.split(/\s[–—]\s/)[0].replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Deep link to the retailer's own search results for a product. */
+export function retailerSearchUrl(retailer: RetailerId, productName: string): string {
+  const q = retailerSearchQuery(productName);
+  const e = encodeURIComponent(q);
+  switch (retailer) {
+    case "amazon": return `https://www.amazon.in/s?k=${e}`;
+    case "flipkart": return `https://www.flipkart.com/search?q=${e}`;
+    case "myntra": return `https://www.myntra.com/${encodeURIComponent(q.toLowerCase().replace(/\s+/g, "-"))}?rawQuery=${e}`;
+    case "ajio": return `https://www.ajio.com/search/?text=${e}`;
+    case "croma": return `https://www.croma.com/searchB?q=${e}%3Arelevance&text=${e}`;
+    case "reliance": return `https://www.reliancedigital.in/products?q=${e}`;
+    case "tatacliq": return `https://www.tatacliq.com/search/?searchCategory=all&text=${e}`;
+    case "nykaa": return `https://www.nykaa.com/search/result/?q=${e}`;
+    case "vijaysales": return `https://www.vijaysales.com/search-listing?q=${e}`;
+    case "jiomart": return `https://www.jiomart.com/search/${e}`;
+    case "blinkit": return `https://blinkit.com/s/?q=${e}`;
+    case "zepto": return `https://www.zeptonow.com/search?query=${e}`;
+    case "bigbasket": return `https://www.bigbasket.com/ps/?q=${e}`;
+  }
+}

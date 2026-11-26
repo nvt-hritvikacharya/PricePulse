@@ -10,6 +10,7 @@ import { resilientSearch } from "../providers/resilient";
 import { groupOffers } from "./matcher";
 import { persistGroups } from "./catalog-store";
 import { checkAlertsForProducts } from "../notifications/alert-checker";
+import { ensureProductImages } from "../images/product-images";
 
 interface Aggregate {
   offers: OfferDTO[];
@@ -28,7 +29,11 @@ async function aggregate(query: string): Promise<Aggregate> {
   );
   const allOffers = settled.flatMap((s) => s.offers);
   const groups = groupOffers(allOffers).slice(0, 24);
-  const { offers, productIds } = await persistGroups(groups);
+  const persisted = await persistGroups(groups);
+  const productIds = persisted.productIds;
+  const products = [...new Map(persisted.offers.map((o) => [o.productId, { id: o.productId, name: o.productName, imageUrl: o.imageUrl }])).values()];
+  const images = await ensureProductImages(products);
+  const offers = images.size ? persisted.offers.map((o) => (images.has(o.productId) ? { ...o, imageUrl: images.get(o.productId)! } : o)) : persisted.offers;
   return {
     offers,
     productIds,

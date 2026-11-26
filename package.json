@@ -5,7 +5,7 @@
   "description": "PricePulse India - compare prices across Indian e-commerce sites, track history and set alerts.",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && next build && node scripts/deploy-db.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -17,7 +17,9 @@
     "db:reset": "prisma migrate reset --force",
     "alerts:check": "tsx --env-file=.env scripts/check-alerts.ts",
     "vapid:generate": "web-push generate-vapid-keys",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "admin:grant": "tsx --env-file-if-exists=.env scripts/admin-role.ts grant",
+    "admin:revoke": "tsx --env-file-if-exists=.env scripts/admin-role.ts revoke"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
