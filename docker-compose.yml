@@ -1,0 +1,77 @@
+# PricePulse India – local stack: Postgres + Redis + one-shot migrate/seed + app.
+#   docker compose up --build        → http://localhost:3000
+# Values come from `.env` (copy .env.example). DATABASE_URL / REDIS_URL are overridden
+# here to point at the compose services.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pricepulse
+      POSTGRES_PASSWORD: pricepulse
+      POSTGRES_DB: pricepulse
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pricepulse -d pricepulse"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports: ["6379:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Applies migrations and seeds the demo catalogue, then exits.
+  migrate:
+    build: { context: ., target: builder }
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql://pricepulse:pricepulse@postgres:5432/pricepulse?schema=public
+    command: ["sh", "-c", "npx prisma migrate deploy && npm run db:seed"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  app:
+    build:
+      context: .
+      target: runner
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+        NEXT_PUBLIC_ENABLE_GOOGLE_AUTH: ${NEXT_PUBLIC_ENABLE_GOOGLE_AUTH:-false}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-}
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql://pricepulse:pricepulse@postgres:5432/pricepulse?schema=public
+      REDIS_URL: redis://redis:6379
+      # The compose stack is a demo: allow the dev OTP bypass when Supabase keys are absent.
+      # Remove this (or set Supabase keys) for any real deployment.
+      ALLOW_DEV_AUTH_IN_PRODUCTION: ${ALLOW_DEV_AUTH_IN_PRODUCTION:-true}
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  # Optional: evaluates price alerts every 30 minutes.
+  alerts-cron:
+    image: curlimages/curl:8.10.1
+    restart: unless-stopped
+    env_file: [.env]
+    entrypoint: ["sh", "-c", "while true; do sleep 1800; curl -fsS -X POST -H \"Authorization: Bearer $$CRON_SECRET\" http://app:3000/api/cron/check-alerts || true; done"]
+    depends_on: [app]
+
+volumes:
+  pgdata:
+  redisdata:

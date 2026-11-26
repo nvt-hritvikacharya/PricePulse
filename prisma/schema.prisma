@@ -1,0 +1,306 @@
+// PricePulse India data model.
+// Core user-facing tables: User, SearchHistory, Wishlist, PriceAlert, RecentlyViewed,
+// FavoriteProduct, NotificationPreference. Supporting tables hold the product catalog,
+// per-retailer offers, price snapshots (history), sessions, push subscriptions and logs.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AuthMethod {
+  EMAIL_OTP
+  PHONE_OTP
+  GOOGLE
+  DEV
+}
+
+enum Availability {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+  PREORDER
+  UNKNOWN
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+model User {
+  id                     String                  @id @default(cuid())
+  supabaseId             String?                 @unique
+  email                  String?                 @unique
+  phone                  String?                 @unique
+  name                   String?
+  avatarUrl              String?
+  role                   Role                    @default(USER)
+  authMethod             AuthMethod              @default(EMAIL_OTP)
+  theme                  String                  @default("system")
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  lastLoginAt            DateTime?
+  lastActiveAt           DateTime?
+  sessions               Session[]
+  searchHistory          SearchHistory[]
+  wishlist               Wishlist[]
+  priceAlerts            PriceAlert[]
+  recentlyViewed         RecentlyViewed[]
+  favorites              FavoriteProduct[]
+  notificationPreference NotificationPreference?
+  pushSubscriptions      PushSubscription[]
+  notifications          Notification[]
+
+  @@map("users")
+}
+
+/// Server-side session record backing the signed session cookie (enables revocation + inactivity audit).
+model Session {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  userAgent    String?
+  ip           String?
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Product {
+  id             String           @id @default(cuid())
+  /// Normalised matching key used to merge offers from different retailers into one product.
+  matchKey       String           @unique
+  slug           String           @unique
+  name           String
+  brand          String?
+  category       String?
+  imageUrl       String?
+  description    String?
+  specs          Json?
+  reviewSummary  Json?
+  isMock         Boolean          @default(false)
+  releasedAt     DateTime?
+  viewCount      Int              @default(0)
+  compareCount   Int              @default(0)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  offers         Offer[]
+  snapshots      PriceSnapshot[]
+  wishlist       Wishlist[]
+  alerts         PriceAlert[]
+  recentlyViewed RecentlyViewed[]
+  favorites      FavoriteProduct[]
+
+  @@index([category])
+  @@index([brand])
+  @@map("products")
+}
+
+/// Latest known offer for a product on one retailer.
+model Offer {
+  id              String       @id @default(cuid())
+  productId       String
+  product         Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  retailer        String
+  providerId      String
+  externalId      String?
+  title           String
+  url             String
+  imageUrl        String?
+  price           Decimal      @db.Decimal(12, 2)
+  mrp             Decimal?     @db.Decimal(12, 2)
+  deliveryCharge  Decimal?     @db.Decimal(10, 2)
+  deliveryEtaDays Float?
+  sellerName      String?
+  sellerRating    Float?
+  ratingCount     Int?
+  availability    Availability @default(UNKNOWN)
+  isMock          Boolean      @default(false)
+  fetchedAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([productId, retailer])
+  @@index([retailer])
+  @@map("offers")
+}
+
+/// Point-in-time price observation; powers the 30/90-day history charts.
+model PriceSnapshot {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  retailer   String
+  price      Decimal  @db.Decimal(12, 2)
+  mrp        Decimal? @db.Decimal(12, 2)
+  capturedAt DateTime @default(now())
+  isMock     Boolean  @default(false)
+
+  @@index([productId, capturedAt])
+  @@index([productId, retailer, capturedAt])
+  @@map("price_snapshots")
+}
+
+model SearchHistory {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  query       String
+  normalized  String
+  resultCount Int      @default(0)
+  durationMs  Int?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([normalized])
+  @@index([createdAt])
+  @@map("search_history")
+}
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@map("wishlist")
+}
+
+model FavoriteProduct {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@map("favorite_products")
+}
+
+model RecentlyViewed {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId, viewedAt])
+  @@map("recently_viewed")
+}
+
+model PriceAlert {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  targetPrice     Decimal   @db.Decimal(12, 2)
+  /// Optional: only trigger for a specific retailer.
+  retailer        String?
+  notifyEmail     Boolean   @default(true)
+  notifyPush      Boolean   @default(true)
+  active          Boolean   @default(true)
+  lastCheckedAt   DateTime?
+  lastNotifiedAt  DateTime?
+  triggeredPrice  Decimal?  @db.Decimal(12, 2)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([active, productId])
+  @@index([userId])
+  @@map("price_alerts")
+}
+
+model NotificationPreference {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailAlerts    Boolean  @default(true)
+  pushAlerts     Boolean  @default(true)
+  weeklyDigest   Boolean  @default(false)
+  priceDropOnly  Boolean  @default(true)
+  minDropPercent Int      @default(5)
+  updatedAt      DateTime @updatedAt
+
+  @@map("notification_preferences")
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@map("push_subscriptions")
+}
+
+/// In-app notification inbox (also the delivery record for email/push).
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  url       String?
+  channels  String[]
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+/// Outbound provider call log for the admin API-health view.
+model ProviderCall {
+  id         String   @id @default(cuid())
+  providerId String
+  operation  String
+  ok         Boolean
+  latencyMs  Int
+  statusCode Int?
+  error      String?
+  cached     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([providerId, createdAt])
+  @@index([createdAt])
+  @@map("provider_calls")
+}
+
+model AppLog {
+  id        String   @id @default(cuid())
+  level     LogLevel
+  scope     String
+  message   String
+  context   Json?
+  createdAt DateTime @default(now())
+
+  @@index([level, createdAt])
+  @@index([createdAt])
+  @@map("app_logs")
+}
