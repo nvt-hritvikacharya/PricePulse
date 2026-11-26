@@ -1,0 +1,63 @@
+import "server-only";
+import { z } from "zod";
+
+/**
+ * Validated server-side environment. Everything integration-related is optional so the
+ * app boots in demo mode with zero configuration; only DATABASE_URL is required at runtime.
+ */
+const schema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NEXT_PUBLIC_APP_URL: z.string().default("http://localhost:3000"),
+  SESSION_SECRET: z.string().default("dev-insecure-session-secret-change-me-please-0000"),
+  SESSION_IDLE_MINUTES: z.coerce.number().int().positive().default(60),
+  ADMIN_EMAILS: z.string().default(""),
+  DATABASE_URL: z.string().optional(),
+  REDIS_URL: z.string().optional(),
+  NEXT_PUBLIC_SUPABASE_URL: z.string().optional(),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
+  DEV_OTP_CODE: z.string().default("123456"),
+  ALLOW_DEV_AUTH_IN_PRODUCTION: z.string().optional(),
+  AMAZON_PAAPI_ACCESS_KEY: z.string().optional(),
+  AMAZON_PAAPI_SECRET_KEY: z.string().optional(),
+  AMAZON_PAAPI_PARTNER_TAG: z.string().optional(),
+  AMAZON_PAAPI_HOST: z.string().default("webservices.amazon.in"),
+  AMAZON_PAAPI_REGION: z.string().default("eu-west-1"),
+  FLIPKART_AFFILIATE_ID: z.string().optional(),
+  FLIPKART_AFFILIATE_TOKEN: z.string().optional(),
+  SERPAPI_API_KEY: z.string().optional(),
+  MOCK_PROVIDER: z.enum(["auto", "always", "never"]).default("auto"),
+  PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+  PROVIDER_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  SEARCH_CACHE_TTL: z.coerce.number().int().positive().default(900),
+  LLM_API_KEY: z.string().optional(),
+  LLM_BASE_URL: z.string().default("https://api.openai.com/v1"),
+  LLM_MODEL: z.string().default("gpt-4o-mini"),
+  SMTP_URL: z.string().optional(),
+  EMAIL_FROM: z.string().default("PricePulse India <alerts@pricepulse.in>"),
+  NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default("mailto:alerts@pricepulse.in"),
+  CRON_SECRET: z.string().optional(),
+});
+
+// Treat empty strings as "unset" so `.env.example` can be copied verbatim.
+const raw = Object.fromEntries(
+  Object.entries(process.env).map(([k, v]) => [k, v === "" ? undefined : v]),
+);
+
+export const env = schema.parse(raw);
+
+export const isSupabaseConfigured = Boolean(
+  env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+);
+
+/** Dev OTP bypass is only available when Supabase is not configured. */
+export const isDevAuthEnabled =
+  !isSupabaseConfigured &&
+  (env.NODE_ENV !== "production" || env.ALLOW_DEV_AUTH_IN_PRODUCTION === "true");
+
+export const adminIdentifiers = new Set(
+  env.ADMIN_EMAILS.split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
