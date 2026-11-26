@@ -18,9 +18,6 @@ const schema = z.object({
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   ENABLE_GOOGLE_AUTH: z.string().optional(),
-  // Product images: Google Programmable Search (image search) and/or SerpApi Google Images.
-  GOOGLE_CSE_API_KEY: z.string().optional(),
-  GOOGLE_CSE_ID: z.string().optional(),
   AMAZON_PAAPI_ACCESS_KEY: z.string().optional(),
   AMAZON_PAAPI_SECRET_KEY: z.string().optional(),
   AMAZON_PAAPI_PARTNER_TAG: z.string().optional(),

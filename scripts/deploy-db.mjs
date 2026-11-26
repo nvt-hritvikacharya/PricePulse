@@ -1,5 +1,5 @@
-// Runs at the end of `npm run build`: applies Prisma migrations and the idempotent seed
-// against the host-provided database. Skips when DATABASE_URL is unset so plain builds pass.
+// Runs at the end of `npm run build`: applies Prisma migrations, the idempotent seed and the
+// product-photo warm-up against the host-provided database. Skips when DATABASE_URL is unset.
 import { execFileSync } from "node:child_process";
 
 const url = process.env.DATABASE_URL?.trim() ?? "";
@@ -15,3 +15,4 @@ const run = (bin, args, databaseUrl) =>
 
 run("prisma", ["migrate", "deploy"], direct);
 if (process.env.SKIP_SEED !== "true") run("tsx", ["prisma/seed.ts"], direct);
+run("tsx", ["scripts/warm-images.ts"], url);

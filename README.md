@@ -68,7 +68,7 @@ Compose starts the following services:
 |---|---|---|
 | Sign up / sign in (email + password, mobile + passcode) | Works | — |
 | Google login | Hidden | Supabase keys + Google provider enabled in Supabase + `ENABLE_GOOGLE_AUTH=true` |
-| Real product photos | Generated artwork | `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID`, or `SERPAPI_API_KEY` |
+| Real product photos | Generated artwork | `SERPAPI_IMAGES_API_KEY` (SerpApi free plan) |
 | Search, comparison, sorting, filters | Mock provider (labelled demo data) | Any provider key below for live prices |
 | Amazon live prices | — | `AMAZON_PAAPI_ACCESS_KEY`, `AMAZON_PAAPI_SECRET_KEY`, `AMAZON_PAAPI_PARTNER_TAG` |
 | Flipkart live prices | — | `FLIPKART_AFFILIATE_ID`, `FLIPKART_AFFILIATE_TOKEN` |
@@ -176,7 +176,12 @@ None of these retailers offers an open public price API, and **this project does
 
 ## Product images & store links
 
-- Demo catalogue products start with generated artwork. When `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` ([Google Programmable Search](https://developers.google.com/custom-search/v1/overview), image search enabled) or `SERPAPI_API_KEY` ([SerpApi Google Images](https://serpapi.com/google-images-api)) is set, the first search or product view looks up a real photo, preferring retailer and brand CDNs. The result is saved on the product, so each product is looked up only once.
+- Demo catalogue products start with generated artwork. Set `SERPAPI_IMAGES_API_KEY` ([SerpApi Google Images](https://serpapi.com/google-images-api); the free plan gives 250 searches a month) and each product gets a real photo from Google Images, preferring retailer and brand CDNs.
+  - The deploy step (`scripts/warm-images.ts`) fetches photos for the whole catalogue once. Products added later are looked up on their first search or view.
+  - Each photo is saved on the product, so it's never looked up again. A search that finds nothing usable isn't repeated for 30 days.
+  - Lookups stop at `IMAGE_LOOKUPS_PER_MONTH` (default 200) and are recorded in `provider_calls`, so the app stays inside the free plan. After an error (wrong key, outage), lookups pause for 10 minutes.
+  - Use the separate `SERPAPI_IMAGES_API_KEY` rather than `SERPAPI_API_KEY`: the latter also turns on live Google Shopping prices, which spend a search on every user search.
+  - Google's own Custom Search JSON API is closed to new customers and shuts down on 1 January 2027, so it isn't used.
 - Products from real price APIs (Amazon PA-API, Flipkart, SerpApi Shopping) use the image those APIs return.
 - Images load directly from their source in the browser; the server never proxies third-party image URLs.
 - **Buy** buttons on demo offers open the retailer's own search results for the product (for example `amazon.in/s?k=…`). Real offers link to the product page the API returned.
@@ -259,7 +264,7 @@ The repo is set up for Cursor's app hosting:
 - [ ] Set a strong `SESSION_SECRET` (≥ 32 chars) and a strong `CRON_SECRET`.
 - [ ] Grant yourself admin with `npm run admin:grant -- <your email>` (against the production `DATABASE_URL`).
 - [ ] Optional: Supabase Google OAuth with redirect URL `https://<your-domain>/auth/callback`.
-- [ ] Optional: `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` or `SERPAPI_API_KEY` for product photos.
+- [ ] Optional: `SERPAPI_IMAGES_API_KEY` for real product photos (SerpApi free plan).
 - [ ] Add at least one price-provider key and set `MOCK_PROVIDER=never` to hide demo data.
 - [ ] Configure `SMTP_URL` and VAPID keys for alerts.
 - [ ] Point `REDIS_URL` at a managed Redis. It is required for correct rate limiting across multiple instances.

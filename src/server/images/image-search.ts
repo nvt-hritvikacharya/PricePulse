@@ -1,7 +1,6 @@
 /**
  * Pure helpers for product-image search results (no I/O, unit-tested).
- * Google Programmable Search (searchType=image) and SerpApi Google Images both return
- * candidate images; we prefer large photos hosted on retailer / brand CDNs.
+ * SerpApi Google Images returns candidate images; we prefer large photos hosted on retailer / brand CDNs.
  */
 export interface ImageCandidate {
   url: string;
@@ -41,16 +40,6 @@ export function pickImage(candidates: ImageCandidate[]): string | null {
   });
   const preferred = usable.find((c) => PREFERRED_HOSTS.some((re) => re.test(host(c.url)!)));
   return (preferred ?? usable[0])?.url ?? null;
-}
-
-interface GoogleCseResponse {
-  items?: { link?: string; image?: { width?: number; height?: number } }[];
-}
-
-export function parseGoogleCse(json: unknown): ImageCandidate[] {
-  return ((json as GoogleCseResponse).items ?? [])
-    .filter((i) => typeof i.link === "string")
-    .map((i) => ({ url: i.link!, width: i.image?.width, height: i.image?.height }));
 }
 
 interface SerpApiImagesResponse {

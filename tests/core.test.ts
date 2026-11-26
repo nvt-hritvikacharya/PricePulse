@@ -7,7 +7,8 @@ import { matchRetailer, retailerSearchQuery, retailerSearchUrl } from "../src/fe
 import { signinSchema, signupSchema } from "../src/features/auth/schemas";
 import { hashSecret, verifySecret } from "../src/lib/passwords";
 import { safeNextPath } from "../src/lib/safe-next";
-import { parseGoogleCse, parseSerpApiImages, pickImage } from "../src/server/images/image-search";
+import { parseSerpApiImages, pickImage } from "../src/server/images/image-search";
+import { imageSearchKey, monthlyImageBudget } from "../src/server/images/serpapi-images";
 import { discountPercent, formatINR } from "../src/lib/utils";
 import type { ProviderOffer } from "../src/server/providers/types";
 
@@ -108,17 +109,26 @@ test("retailer deep links search the retailer site for the product", () => {
 });
 
 test("image search prefers large https photos from retailer CDNs", () => {
-  const google = parseGoogleCse({
-    items: [
-      { link: "http://insecure.example/a.jpg", image: { width: 800, height: 800 } },
-      { link: "https://blog.example/tiny.jpg", image: { width: 120, height: 90 } },
-      { link: "https://cdn.example/photo.jpg", image: { width: 900, height: 700 } },
-      { link: "https://m.media-amazon.com/images/I/61abc.jpg", image: { width: 1000, height: 1000 } },
+  const results = parseSerpApiImages({
+    images_results: [
+      { original: "http://insecure.example/a.jpg", original_width: 800, original_height: 800 },
+      { original: "https://blog.example/tiny.jpg", original_width: 120, original_height: 90 },
+      { original: "https://x.example/logo.svg" },
+      { original: "https://cdn.example/photo.jpg", original_width: 900, original_height: 700 },
+      { original: "https://m.media-amazon.com/images/I/61abc.jpg", original_width: 1000, original_height: 1000 },
+      { thumbnail: "https://encrypted-tbn0.gstatic.com/x" },
     ],
   });
-  assert.equal(pickImage(google), "https://m.media-amazon.com/images/I/61abc.jpg");
-  assert.equal(pickImage(google.slice(0, 3)), "https://cdn.example/photo.jpg");
-  const serp = parseSerpApiImages({ images_results: [{ original: "https://x.example/logo.svg" }, { original: "https://rukminim2.flixcart.com/image/p.jpeg", original_width: 600, original_height: 600 }] });
-  assert.equal(pickImage(serp), "https://rukminim2.flixcart.com/image/p.jpeg");
-  assert.equal(pickImage(parseGoogleCse({})), null);
+  assert.equal(results.length, 5);
+  assert.equal(pickImage(results), "https://m.media-amazon.com/images/I/61abc.jpg");
+  assert.equal(pickImage(results.slice(0, 4)), "https://cdn.example/photo.jpg");
+  assert.equal(pickImage(parseSerpApiImages({})), null);
+});
+
+test("image lookups use a dedicated key when set and stay inside the free plan by default", () => {
+  assert.equal(imageSearchKey({ SERPAPI_IMAGES_API_KEY: "img", SERPAPI_API_KEY: "shop" }), "img");
+  assert.equal(imageSearchKey({ SERPAPI_API_KEY: "shop" }), "shop");
+  assert.equal(imageSearchKey({}), undefined);
+  assert.equal(monthlyImageBudget({}), 200);
+  assert.equal(monthlyImageBudget({ IMAGE_LOOKUPS_PER_MONTH: "50" }), 50);
 });
