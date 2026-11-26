@@ -8,7 +8,7 @@ const WARN_BEFORE_MS = 2 * 60_000;
 const EVENTS = ["pointerdown", "keydown", "wheel", "touchstart", "scroll"] as const;
 
 /**
- * Enforces the 1-hour inactivity timeout on the client:
+ * Enforces the inactivity timeout (SESSION_IDLE_MINUTES, default 30) on the client:
  *  - any interaction (throttled to every 30s) slides the server session forward,
  *  - shows a "stay signed in" toast 2 minutes before expiry,
  *  - signs out + redirects to /login when the window lapses.

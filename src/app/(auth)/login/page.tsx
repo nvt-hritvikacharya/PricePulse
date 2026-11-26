@@ -1,20 +1,20 @@
 import type { Metadata } from "next";
-import { env, isDevAuthEnabled, isGoogleAuthEnabled, isPublicDemoAuth, isSupabaseConfigured, supabaseAnonKey, supabaseUrl } from "@/lib/env";
+import { env, isGoogleAuthEnabled, supabaseAnonKey, supabaseUrl } from "@/lib/env";
+import { otpAvailability } from "@/server/auth/otp";
 import { LoginView } from "@/features/auth/components/login-view";
 
 export const metadata: Metadata = {
   title: "Sign in",
-  description: "Sign in to PricePulse India with an email or mobile OTP to compare prices and set price-drop alerts.",
+  description: "Sign in or create a PricePulse India account with an email or mobile OTP to compare prices and set price-drop alerts.",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ reason?: string; next?: string; error?: string }> }) {
   const sp = await searchParams;
+  const otp = otpAvailability();
   return (
     <LoginView
-      devMode={isDevAuthEnabled}
-      publicDemo={isPublicDemoAuth}
-      devCode={isDevAuthEnabled ? env.DEV_OTP_CODE : undefined}
-      authConfigured={isSupabaseConfigured || isDevAuthEnabled}
+      channels={{ email: otp.email, phone: otp.phone }}
+      devLog={otp.devLog}
       google={isGoogleAuthEnabled ? { url: supabaseUrl!, anonKey: supabaseAnonKey! } : undefined}
       reason={sp.reason}
       error={sp.error}

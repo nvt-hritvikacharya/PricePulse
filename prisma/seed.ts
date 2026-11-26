@@ -9,7 +9,7 @@ import { PrismaClient, type Prisma } from "@prisma/client";
 import { MOCK_CATALOG } from "../src/server/providers/mock/catalog";
 import { mockHistory, offerFor, productSlug, retailersFor } from "../src/server/providers/mock/pricing";
 import { buildReviewSummary } from "../src/server/pricing/review-summary";
-import { RETAILERS } from "../src/features/retailers/retailers";
+import { retailerSearchUrl } from "../src/features/retailers/retailers";
 import { slugify } from "../src/lib/utils";
 
 const db = new PrismaClient();
@@ -78,7 +78,7 @@ async function seedCatalog() {
         providerId: "mock",
         externalId: `${item.key}@${o.retailer}`,
         title: item.name,
-        url: `https://www.${RETAILERS[o.retailer].domain}/search?q=${encodeURIComponent(item.name)}`,
+        url: retailerSearchUrl(o.retailer, item.name),
         imageUrl: `/api/img/${item.key}`,
         price: o.price,
         mrp: o.mrp,

@@ -9,7 +9,7 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   NEXT_PUBLIC_APP_URL: z.string().default("http://localhost:3000"),
   SESSION_SECRET: z.string().optional(),
-  SESSION_IDLE_MINUTES: z.coerce.number().int().positive().default(60),
+  SESSION_IDLE_MINUTES: z.coerce.number().int().positive().default(30),
   ADMIN_EMAILS: z.string().default(""),
   DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().optional(),
@@ -19,8 +19,15 @@ const schema = z.object({
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   ENABLE_GOOGLE_AUTH: z.string().optional(),
-  DEV_OTP_CODE: z.string().default("123456"),
-  ALLOW_DEV_AUTH_IN_PRODUCTION: z.string().optional(),
+  // OTP delivery: email via Resend (or SMTP_URL), SMS via Twilio Verify.
+  RESEND_API_KEY: z.string().optional(),
+  OTP_EMAIL_FROM: z.string().optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
+  // Product images: Google Programmable Search (image search) and/or SerpApi Google Images.
+  GOOGLE_CSE_API_KEY: z.string().optional(),
+  GOOGLE_CSE_ID: z.string().optional(),
   AMAZON_PAAPI_ACCESS_KEY: z.string().optional(),
   AMAZON_PAAPI_SECRET_KEY: z.string().optional(),
   AMAZON_PAAPI_PARTNER_TAG: z.string().optional(),
@@ -60,17 +67,15 @@ export const isGoogleAuthEnabled =
 
 export const vapidPublicKey = env.VAPID_PUBLIC_KEY ?? env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
-/** Dev OTP bypass is only available when Supabase is not configured. */
-export const isDevAuthEnabled =
-  !isSupabaseConfigured &&
-  (env.NODE_ENV !== "production" ||
-    (env.ALLOW_DEV_AUTH_IN_PRODUCTION ?? process.env.DEV_AUTH_PRODUCTION_DEFAULT) === "true");
+export type EmailOtpProvider = "resend" | "smtp" | "log";
+export type SmsOtpProvider = "twilio_verify" | "log";
 
-/**
- * Public demo: the dev OTP is on in a production deployment, so anyone who can open the app
- * knows the code. Dev logins then never get admin rights and can't take over another browser's account.
- */
-export const isPublicDemoAuth = isDevAuthEnabled && env.NODE_ENV === "production";
+/** "log" (code printed to the server console) exists only outside production. */
+const devLog = env.NODE_ENV !== "production" ? ("log" as const) : null;
+
+export const emailOtpProvider: EmailOtpProvider | null = env.RESEND_API_KEY ? "resend" : env.SMTP_URL ? "smtp" : devLog;
+export const smsOtpProvider: SmsOtpProvider | null =
+  env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID ? "twilio_verify" : devLog;
 
 export const adminIdentifiers = new Set(
   env.ADMIN_EMAILS.split(",")

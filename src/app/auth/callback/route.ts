@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       avatarUrl: (meta.avatar_url as string) ?? null,
       method: "GOOGLE",
     });
-    await startSession(user);
+    await startSession(user, "GOOGLE");
     return NextResponse.redirect(new URL(safeNext, url.origin));
   } catch (err) {
     logger.warn("auth", "OAuth callback failed", { error: (err as Error).message });

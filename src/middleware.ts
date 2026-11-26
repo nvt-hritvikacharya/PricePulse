@@ -6,7 +6,7 @@ import { SESSION_COOKIE, verifySession } from "@/features/auth/session-token";
  * sent to /login (the app's first screen). API routes return 401 JSON instead of redirects.
  * Full DB-level session validation (revocation) happens in `getCurrentUser()`.
  */
-const PUBLIC_PREFIXES = ["/login", "/auth/callback", "/api/auth/otp", "/api/auth/logout", "/api/img", "/api/cron", "/api/health"];
+const PUBLIC_PREFIXES = ["/login", "/auth/callback", "/api/auth/otp", "/api/auth/signup", "/api/auth/logout", "/api/img", "/api/cron", "/api/health"];
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;

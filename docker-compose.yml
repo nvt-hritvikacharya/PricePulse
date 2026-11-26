@@ -55,9 +55,6 @@ services:
     environment:
       DATABASE_URL: postgresql://pricepulse:pricepulse@postgres:5432/pricepulse?schema=public
       REDIS_URL: redis://redis:6379
-      # The compose stack is a demo: allow the dev OTP bypass when Supabase keys are absent.
-      # Remove this (or set Supabase keys) for any real deployment.
-      ALLOW_DEV_AUTH_IN_PRODUCTION: ${ALLOW_DEV_AUTH_IN_PRODUCTION:-true}
     ports: ["3000:3000"]
     depends_on:
       postgres: { condition: service_healthy }

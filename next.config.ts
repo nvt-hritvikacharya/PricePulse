@@ -11,14 +11,12 @@ const nextConfig: NextConfig = {
   // Docker builds set NEXT_OUTPUT=standalone for a minimal runtime image; `next start` uses the default.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   poweredByHeader: false,
-  // Hosted builds run as a public demo until Supabase is configured; the Docker image
-  // (standalone output) keeps the dev OTP off unless ALLOW_DEV_AUTH_IN_PRODUCTION=true.
-  env: { DEV_AUTH_PRODUCTION_DEFAULT: process.env.NEXT_OUTPUT === "standalone" ? "false" : "true" },
   reactStrictMode: true,
   serverExternalPackages: ["ioredis", "web-push", "nodemailer"],
   images: {
-    // Retailer/aggregator CDNs vary per provider, so allow any https host.
-    remotePatterns: [{ protocol: "https", hostname: "**" }],
+    // Product photos come from many retailer CDNs; browsers load them directly instead of
+    // through Next's image proxy, so the server never fetches third-party URLs.
+    unoptimized: true,
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

@@ -2,7 +2,7 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import type { AuthMethod, User } from "@prisma/client";
 import { db } from "@/lib/db";
-import { adminIdentifiers, isPublicDemoAuth } from "@/lib/env";
+import { adminIdentifiers } from "@/lib/env";
 import { HttpError } from "@/lib/api";
 import { logger } from "@/lib/logger";
 import { SESSION_COOKIE, idleSeconds, sessionCookieOptions, signSession, verifySession } from "../session-token";
@@ -27,16 +27,13 @@ export interface IdentityInput {
   name?: string | null;
   avatarUrl?: string | null;
   method: AuthMethod;
-  demoDeviceHash?: string | null;
 }
 
 /** Finds or creates the local user row for an authenticated identity. */
 export async function upsertUser(identity: IdentityInput): Promise<User> {
   const email = identity.email?.toLowerCase() || null;
   const phone = identity.phone || null;
-  // Anyone can claim any identifier with the public demo code, so it never grants admin.
-  const canBeAdmin = !(isPublicDemoAuth && identity.method === "DEV");
-  const isAdmin = canBeAdmin && ((email && adminIdentifiers.has(email)) || (phone && adminIdentifiers.has(phone)));
+  const isAdmin = (email && adminIdentifiers.has(email)) || (phone && adminIdentifiers.has(phone));
 
   const existing = await db.user.findFirst({
     where: {
@@ -73,7 +70,6 @@ export async function upsertUser(identity: IdentityInput): Promise<User> {
       avatarUrl: identity.avatarUrl ?? undefined,
       authMethod: identity.method,
       role: isAdmin ? "ADMIN" : "USER",
-      demoDeviceHash: identity.demoDeviceHash ?? undefined,
       lastLoginAt: new Date(),
       lastActiveAt: new Date(),
       notificationPreference: { create: {} },
@@ -81,12 +77,13 @@ export async function upsertUser(identity: IdentityInput): Promise<User> {
   });
 }
 
-/** Creates a DB session row and sets the signed cookie. */
-export async function startSession(user: User) {
+/** Creates a DB session row (the login record) and sets the signed cookie. */
+export async function startSession(user: User, method: AuthMethod) {
   const h = await headers();
   const session = await db.session.create({
     data: {
       userId: user.id,
+      method,
       expiresAt: new Date(Date.now() + idleSeconds() * 1000),
       userAgent: h.get("user-agent")?.slice(0, 300),
       ip: h.get("x-forwarded-for")?.split(",")[0] ?? null,
@@ -94,7 +91,7 @@ export async function startSession(user: User) {
   });
   const token = await signSession({ sid: session.id, uid: user.id, role: user.role });
   (await cookies()).set(SESSION_COOKIE, token, sessionCookieOptions());
-  logger.info("auth", "Session started", { userId: user.id, method: user.authMethod });
+  logger.info("auth", "Session started", { userId: user.id, method });
   return session;
 }
 

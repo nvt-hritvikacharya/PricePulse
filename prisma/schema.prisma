@@ -53,7 +53,12 @@ model User {
   updatedAt              DateTime                @updatedAt
   lastLoginAt            DateTime?
   lastActiveAt           DateTime?
-  /// Public demo mode: SHA-256 of the browser cookie that created this dev-login account.
+  dateOfBirth            DateTime?               @db.Date
+  /// female | male | non_binary | prefer_not_to_say
+  gender                 String?
+  emailVerifiedAt        DateTime?
+  phoneVerifiedAt        DateTime?
+  /// Legacy (former public demo mode); unused.
   demoDeviceHash         String?
   sessions               Session[]
   searchHistory          SearchHistory[]
@@ -79,9 +84,34 @@ model Session {
   revokedAt    DateTime?
   userAgent    String?
   ip           String?
+  /// How this login was authenticated.
+  method       AuthMethod?
 
   @@index([userId])
+  @@index([createdAt])
   @@map("sessions")
+}
+
+/// One-time password challenge for sign-in / sign-up. Only a hash of the code is stored.
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  /// "email" | "phone"
+  channel    String
+  /// Normalised email or +91 phone number.
+  target     String
+  /// "signin" | "signup"
+  purpose    String
+  /// "resend" | "smtp" | "twilio_verify" | "log"
+  provider   String
+  /// HMAC of the code; null when the provider (Twilio Verify) holds the code.
+  codeHash   String?
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([target, purpose, createdAt])
+  @@map("otp_challenges")
 }
 
 model Product {

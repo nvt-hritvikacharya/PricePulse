@@ -19,7 +19,7 @@ export interface SessionClaims {
 }
 
 export function idleSeconds(): number {
-  const minutes = Number(process.env.SESSION_IDLE_MINUTES || 60);
+  const minutes = Number(process.env.SESSION_IDLE_MINUTES || 30);
   return Math.max(60, Math.round(minutes * 60));
 }
 
@@ -29,7 +29,7 @@ let secretKey: Promise<Uint8Array> | undefined;
  * HMAC key for session tokens: SESSION_SECRET when set, otherwise derived from the
  * (secret, host-supplied) DATABASE_URL so a deployment without SESSION_SECRET still gets a private key.
  */
-function secret(): Promise<Uint8Array> {
+export function secret(): Promise<Uint8Array> {
   secretKey ??= deriveSecret().catch((error: unknown) => {
     secretKey = undefined;
     throw error;

@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { groupOffers, matchKeyFor } from "../src/server/pricing/matcher";
 import { mockHistory, offerFor, priceOn, searchCatalog, syntheticProducts } from "../src/server/providers/mock/pricing";
 import { MOCK_CATALOG } from "../src/server/providers/mock/catalog";
-import { matchRetailer } from "../src/features/retailers/retailers";
-import { sendOtpSchema } from "../src/features/auth/schemas";
+import { matchRetailer, retailerSearchQuery, retailerSearchUrl } from "../src/features/retailers/retailers";
+import { sendOtpSchema, signupProfileSchema } from "../src/features/auth/schemas";
+import { parseGoogleCse, parseSerpApiImages, pickImage } from "../src/server/images/image-search";
 import { discountPercent, formatINR } from "../src/lib/utils";
 import type { ProviderOffer } from "../src/server/providers/types";
 
@@ -58,4 +59,38 @@ test("formatting helpers", () => {
   assert.equal(discountPercent(750, 1000), 25);
   assert.equal(discountPercent(1000, 900), 0);
   assert.match(formatINR(129999), /1,29,999/);
+});
+
+test("sign-up profile requires all fields and a plausible date of birth", () => {
+  const ok = signupProfileSchema.parse({ name: " Priya Sharma ", email: "Priya@Example.com", phone: "98765 43210", dateOfBirth: "1995-04-12", gender: "female" });
+  assert.equal(ok.name, "Priya Sharma");
+  assert.equal(ok.email, "priya@example.com");
+  assert.equal(ok.phone, "+919876543210");
+  const thisYear = new Date().getUTCFullYear();
+  assert.equal(signupProfileSchema.safeParse({ ...ok, dateOfBirth: `${thisYear - 5}-01-01` }).success, false);
+  assert.equal(signupProfileSchema.safeParse({ ...ok, gender: "other" }).success, false);
+  assert.equal(signupProfileSchema.safeParse({ ...ok, name: "" }).success, false);
+});
+
+test("retailer deep links search the retailer site for the product", () => {
+  assert.equal(retailerSearchQuery("Apple iPhone 16 (128 GB) – Ultramarine"), "Apple iPhone 16 128 GB");
+  assert.equal(retailerSearchUrl("amazon", "Sony WH-1000XM5"), "https://www.amazon.in/s?k=Sony%20WH-1000XM5");
+  assert.equal(retailerSearchUrl("flipkart", "Sony WH-1000XM5"), "https://www.flipkart.com/search?q=Sony%20WH-1000XM5");
+  assert.match(retailerSearchUrl("myntra", "Levi's 511 Jeans"), /^https:\/\/www\.myntra\.com\/levi's-511-jeans\?rawQuery=/);
+});
+
+test("image search prefers large https photos from retailer CDNs", () => {
+  const google = parseGoogleCse({
+    items: [
+      { link: "http://insecure.example/a.jpg", image: { width: 800, height: 800 } },
+      { link: "https://blog.example/tiny.jpg", image: { width: 120, height: 90 } },
+      { link: "https://cdn.example/photo.jpg", image: { width: 900, height: 700 } },
+      { link: "https://m.media-amazon.com/images/I/61abc.jpg", image: { width: 1000, height: 1000 } },
+    ],
+  });
+  assert.equal(pickImage(google), "https://m.media-amazon.com/images/I/61abc.jpg");
+  assert.equal(pickImage(google.slice(0, 3)), "https://cdn.example/photo.jpg");
+  const serp = parseSerpApiImages({ images_results: [{ original: "https://x.example/logo.svg" }, { original: "https://rukminim2.flixcart.com/image/p.jpeg", original_width: 600, original_height: 600 }] });
+  assert.equal(pickImage(serp), "https://rukminim2.flixcart.com/image/p.jpeg");
+  assert.equal(pickImage(parseGoogleCse({})), null);
 });

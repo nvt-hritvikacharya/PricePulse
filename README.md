@@ -36,14 +36,12 @@ npm run db:seed                 # demo catalogue, 90-day history, users, sample 
 npm run dev                     # http://localhost:3000
 ```
 
-**Sign in (dev mode):** with no Supabase keys set, the login screen shows a *Developer mode* banner. Enter any email or Indian mobile number and use the code **`123456`** (configurable with `DEV_OTP_CODE`). No message is actually sent.
+**Sign up / sign in (local):** open the app and use **Sign up** to create a profile (name, mobile, email, date of birth, gender), or **Sign in** with an existing account's email or mobile. Without an email/SMS provider configured, a *Developer mode* banner appears and each one-time code is printed in the server console (`[otp] email code for …`). This console fallback never runs in production.
 
 | Seeded account | Role | Notes |
 |---|---|---|
-| `admin@pricepulse.dev` | ADMIN | Can open `/admin`. Any email listed in `ADMIN_EMAILS` gets ADMIN on login |
+| `admin@pricepulse.dev` | ADMIN | Can open `/admin`. Any email or phone listed in `ADMIN_EMAILS` gets ADMIN once verified by OTP |
 | `demo@pricepulse.dev` / `9876543210` | USER | Has a wishlist, alerts and recently viewed items |
-
-> The dev OTP bypass is **disabled automatically** when Supabase keys are present. `npm run build && npm start` builds keep it on as a restricted public demo (see [Publishing on Cursor](#publishing-on-cursor)); set `ALLOW_DEV_AUTH_IN_PRODUCTION=false` to turn it off. The Docker image keeps it off unless `ALLOW_DEV_AUTH_IN_PRODUCTION=true`.
 
 ## Quick start (Docker)
 
@@ -60,7 +58,7 @@ Compose starts the following services:
 - **app**, the Next.js standalone server with a health check on `/api/health`
 - **alerts-cron**, which calls `/api/cron/check-alerts` every 30 minutes
 
-The compose file sets `ALLOW_DEV_AUTH_IN_PRODUCTION=true` so the demo works out of the box. Remove it once Supabase is configured.
+Set `RESEND_API_KEY` (or `SMTP_URL`) and/or the Twilio Verify keys in `.env` so the production container can send sign-in codes.
 
 `NEXT_PUBLIC_*` variables are inlined at build time. Compose passes them as build args from your `.env`, so rebuild after changing them.
 
@@ -68,8 +66,10 @@ The compose file sets `ALLOW_DEV_AUTH_IN_PRODUCTION=true` so the demo works out 
 
 | Feature | Without keys | Needs |
 |---|---|---|
-| Login (Email/Phone OTP) | Dev OTP `123456` | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (+ Supabase SMS provider such as Twilio or MSG91 for phone OTP) |
-| Google login | Hidden | Supabase keys + Google provider enabled in Supabase + `NEXT_PUBLIC_ENABLE_GOOGLE_AUTH=true` |
+| Sign up / sign in by email code | Development: code printed in the server console. Production: unavailable | `RESEND_API_KEY` + `OTP_EMAIL_FROM` (or `SMTP_URL`) |
+| Sign up / sign in by SMS code | Development: code printed in the server console. Production: unavailable | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` |
+| Google login | Hidden | Supabase keys + Google provider enabled in Supabase + `ENABLE_GOOGLE_AUTH=true` |
+| Real product photos | Generated artwork | `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID`, or `SERPAPI_API_KEY` |
 | Search, comparison, sorting, filters | Mock provider (labelled demo data) | Any provider key below for live prices |
 | Amazon live prices | — | `AMAZON_PAAPI_ACCESS_KEY`, `AMAZON_PAAPI_SECRET_KEY`, `AMAZON_PAAPI_PARTNER_TAG` |
 | Flipkart live prices | — | `FLIPKART_AFFILIATE_ID`, `FLIPKART_AFFILIATE_TOKEN` |
@@ -160,15 +160,26 @@ None of these retailers offers an open public price API, and **this project does
 
 ## Authentication & sessions
 
-- **Supabase Auth** handles Email OTP (`signInWithOtp({ email })`), Phone OTP (`signInWithOtp({ phone })`, which needs an SMS provider configured in Supabase) and optional Google OAuth (PKCE via `/auth/callback`). Indian numbers are validated and normalised to `+91XXXXXXXXXX`.
-- After Supabase verifies the user, the app upserts its own `User` row and issues an **httpOnly, signed (HS256) session cookie** backed by a `sessions` table, which allows revocation.
-- **1-hour inactivity timeout:** the token's `exp` is `lastActivity + SESSION_IDLE_MINUTES` (default 60).
+- **Sign up** collects name, mobile number, email ID, date of birth (13+) and gender, checks that the email and mobile aren't already registered, and verifies one of them with a one-time code before the `users` row is created. **Sign in** sends a code to an existing account's email or mobile. Indian numbers are normalised to `+91XXXXXXXXXX`.
+- **OTP delivery** (`src/server/auth/otp.ts`):
+  - **Email:** the app generates a 6-digit code, stores only its HMAC in `otp_challenges`, and sends it through [Resend](https://resend.com) (`RESEND_API_KEY`, sender `OTP_EMAIL_FROM` on a domain verified in Resend), or through any SMTP server (`SMTP_URL`).
+  - **SMS:** [Twilio Verify](https://www.twilio.com/docs/verify) (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`) generates, sends and checks the code. Twilio handles the India DLT template registration that plain SMS needs.
+  - Codes expire after 10 minutes, allow 5 attempts, and requesting a new code voids the old one. Send and verify are also rate-limited per IP and per target.
+- **Google sign-in** is optional, through Supabase OAuth (PKCE via `/auth/callback`; `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH=true`).
+- **Every login is recorded** as a row in the `sessions` table: user, sign-in method, device (user agent), IP, start time, last activity, and how it ended (logout or idle timeout). Users see their own history under **Profile → Login sessions** and can sign out other devices. Admins see all sessions under **Admin → Sessions**. The session cookie is an httpOnly HS256 JWT bound to that row, so sessions can be revoked.
+- **30-minute inactivity timeout:** the token's `exp` is `lastActivity + SESSION_IDLE_MINUTES` (default 30).
   - Interactions (pointer, key, scroll, touch) are throttled to one call every 30 s to `POST /api/auth/activity`. That call slides the window forward in both the cookie and the DB.
   - Background polling does **not** extend the session; only real interaction does.
   - Two minutes before expiry a toast offers “Stay signed in”. When the window lapses the client signs out and redirects to `/login?reason=expired`.
   - Middleware (edge) rejects expired tokens: page requests are redirected to `/login` and API calls get a 401. Server code also validates the DB session.
-- **Logout** (header button and account menu) revokes the DB session, clears the cookie and signs out of Supabase.
-- OTP send and verify are rate-limited per IP and per target.
+- **Logout** revokes the DB session and clears the cookie.
+
+## Product images & store links
+
+- Demo catalogue products start with generated artwork. When `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` ([Google Programmable Search](https://developers.google.com/custom-search/v1/overview), image search enabled) or `SERPAPI_API_KEY` ([SerpApi Google Images](https://serpapi.com/google-images-api)) is set, the first search or product view looks up a real photo, preferring retailer and brand CDNs. The result is saved on the product, so each product is looked up only once.
+- Products from real price APIs (Amazon PA-API, Flipkart, SerpApi Shopping) use the image those APIs return.
+- Images load directly from their source in the browser; the server never proxies third-party image URLs.
+- **Buy** buttons on demo offers open the retailer's own search results for the product (for example `amazon.in/s?k=…`). Real offers link to the product page the API returned.
 
 ## Price alerts & notifications
 
@@ -241,14 +252,15 @@ The repo is set up for Cursor's app hosting:
 - `cursor-app.json` asks the host for a Postgres database; the host sets `DATABASE_URL` for build and runtime.
 - `npm run build` ends with `scripts/deploy-db.mjs`, which runs `prisma migrate deploy` and the idempotent seed against that database (skipped when `DATABASE_URL` is unset; set `SKIP_SEED=true` to skip only the seed).
 - Redis is optional. Without `REDIS_URL` the cache and rate limiter are in-process (per instance).
-- Production builds (except the Docker image) turn on the dev OTP as a **public demo** until `SUPABASE_URL` + `SUPABASE_ANON_KEY` are set. In public demo mode the code never grants ADMIN (seeded admins and `ADMIN_EMAILS` are refused), only accounts created with the demo code can be opened, and each such account is bound to the browser that created it. `demo@pricepulse.dev` stays a shared sample account.
-- Secrets (Supabase, provider keys, `LLM_API_KEY`, `SMTP_URL`, VAPID, `CRON_SECRET`, `SESSION_SECRET`) are set as app secrets on the host. Use the runtime names `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH` and `VAPID_PUBLIC_KEY`, since `NEXT_PUBLIC_*` values are inlined at build time.
+- Sign-in codes need `RESEND_API_KEY` (email) and/or the three `TWILIO_*` keys (SMS). Until at least one is set, the login screen says codes can't be sent yet.
+- Secrets (OTP providers, image search, price-provider keys, `LLM_API_KEY`, `SMTP_URL`, VAPID, `CRON_SECRET`, `SESSION_SECRET`, optional Supabase for Google) are set as app secrets on the host. Use the runtime names `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH` and `VAPID_PUBLIC_KEY`, since `NEXT_PUBLIC_*` values are inlined at build time.
 
 ## Production checklist
 
 - [ ] Set a strong `SESSION_SECRET` (≥ 32 chars) and a strong `CRON_SECRET`.
-- [ ] Configure Supabase: Email OTP template using `{{ .Token }}`, SMS provider for phone OTP, and Google OAuth with redirect URL `https://<your-domain>/auth/callback`.
-- [ ] Set Supabase keys (which turns the dev OTP off), or set `ALLOW_DEV_AUTH_IN_PRODUCTION=false`.
+- [ ] Configure OTP delivery: Resend with a verified sending domain (`RESEND_API_KEY`, `OTP_EMAIL_FROM`) and/or a Twilio Verify service (`TWILIO_*`).
+- [ ] Optional: Supabase Google OAuth with redirect URL `https://<your-domain>/auth/callback`.
+- [ ] Optional: `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` or `SERPAPI_API_KEY` for product photos.
 - [ ] Add at least one price-provider key and set `MOCK_PROVIDER=never` to hide demo data.
 - [ ] Configure `SMTP_URL` and VAPID keys for alerts.
 - [ ] Point `REDIS_URL` at a managed Redis. It is required for correct rate limiting across multiple instances.

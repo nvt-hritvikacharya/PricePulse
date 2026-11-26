@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, BellRing, Clock, KeyRound, Loader2, Mail, ShieldCheck, Smartphone, TrendingDown } from "lucide-react";
+import { ArrowLeft, BellRing, Clock, KeyRound, Loader2, Mail, ShieldCheck, Smartphone, TrendingDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -13,14 +13,14 @@ import { LogoMark } from "@/components/shared/logo";
 import { RetailerLogo } from "@/components/shared/retailer-logo";
 import { ThemeToggle } from "@/components/shared/theme-toggle";
 import { RETAILER_IDS } from "@/features/retailers/retailers";
+import { GENDER_LABELS, GENDERS, type Gender } from "../schemas";
 import { OtpInput } from "./otp-input";
 
 interface Props {
-  devMode: boolean;
-  /** Dev OTP enabled on a production deployment: a public demo. */
-  publicDemo: boolean;
-  devCode?: string;
-  authConfigured: boolean;
+  /** Which channels can deliver a code right now. */
+  channels: { email: boolean; phone: boolean };
+  /** Development only: codes are printed in the server console instead of being sent. */
+  devLog: boolean;
   /** Supabase public URL + anon key, present only when Google sign-in is enabled. */
   google?: { url: string; anonKey: string };
   reason?: string;
@@ -30,6 +30,17 @@ interface Props {
 }
 
 type Channel = "email" | "phone";
+type Mode = "signin" | "signup";
+
+interface SignupForm {
+  name: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+  gender: Gender | "";
+}
+
+const EMPTY_SIGNUP: SignupForm = { name: "", email: "", phone: "", dateOfBirth: "", gender: "" };
 
 function GoogleIcon() {
   return (
@@ -42,47 +53,91 @@ function GoogleIcon() {
   );
 }
 
-export function LoginView({ devMode, publicDemo, devCode, authConfigured, google: googleConfig, reason, error, next, idleMinutes }: Props) {
+/** Latest allowed date of birth (13 years ago), as YYYY-MM-DD. */
+function maxDob() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 13);
+  return d.toISOString().slice(0, 10);
+}
+
+const selectClass =
+  "h-11 w-full rounded-xl border border-input bg-background/70 px-3 text-sm shadow-xs outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40";
+
+export function LoginView({ channels, devLog, google: googleConfig, reason, error, next, idleMinutes }: Props) {
   const router = useRouter();
-  const [channel, setChannel] = useState<Channel>("email");
-  const [step, setStep] = useState<"identify" | "verify">("identify");
+  const defaultChannel: Channel = channels.email || !channels.phone ? "email" : "phone";
+  const [mode, setMode] = useState<Mode>("signin");
+  const [step, setStep] = useState<"form" | "verify">("form");
+  const [channel, setChannel] = useState<Channel>(defaultChannel);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [signup, setSignup] = useState<SignupForm>(EMPTY_SIGNUP);
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<{ message: string; switchTo?: Mode } | null>(null);
 
-  const identifier = channel === "email" ? email : phone;
-  const payload = channel === "email" ? { channel, email } : { channel, phone };
+  const anyChannel = channels.email || channels.phone;
+  const channelReady = channels[channel];
+  const destination = mode === "signin" ? (channel === "email" ? email : phone) : channel === "email" ? signup.email : signup.phone;
 
-  async function sendOtp(e?: React.FormEvent) {
+  function switchMode(m: Mode) {
+    setMode(m);
+    setStep("form");
+    setFormError(null);
+    setOtp("");
+    if (m === "signup") setSignup((s) => ({ ...s, email: s.email || email, phone: s.phone || phone }));
+    else {
+      setEmail((v) => v || signup.email);
+      setPhone((v) => v || signup.phone);
+    }
+  }
+
+  function fail(err: unknown, fallback: string) {
+    if (err instanceof ApiError) {
+      const switchTo = err.code === "account_not_found" ? "signup" : err.code === "account_exists" ? "signin" : undefined;
+      setFormError({ message: err.message, switchTo });
+    } else setFormError({ message: fallback });
+  }
+
+  async function sendCode(e?: React.FormEvent) {
     e?.preventDefault();
     setFormError(null);
+    if (mode === "signup" && !signup.gender) return setFormError({ message: "Select a gender option" });
     setLoading(true);
     try {
-      await api("/api/auth/otp/send", { method: "POST", json: payload });
+      if (mode === "signin") {
+        await api("/api/auth/otp/send", { method: "POST", json: channel === "email" ? { channel, email } : { channel, phone } });
+      } else {
+        await api("/api/auth/signup/send", { method: "POST", json: { channel, email: signup.email, phone: signup.phone } });
+      }
       setStep("verify");
       setOtp("");
-      toast.success(devMode ? `${publicDemo ? "Demo" : "Dev"} mode: use code ${devCode}` : `Code sent to ${identifier}`);
+      toast.success(devLog ? "Developer mode: the code is in the server console" : `Code sent to ${destination}`);
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Couldn't send the code. Try again.");
+      fail(err, "Couldn't send the code. Try again.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function verifyOtp(e?: React.FormEvent) {
+  async function verifyCode(e?: React.FormEvent) {
     e?.preventDefault();
-    if (otp.length !== 6) return setFormError("Enter the 6-digit code");
+    if (otp.length !== 6) return setFormError({ message: "Enter the 6-digit code" });
     setFormError(null);
     setLoading(true);
     try {
-      await api("/api/auth/otp/verify", { method: "POST", json: { ...payload, token: otp } });
-      toast.success("Welcome to PricePulse!");
+      if (mode === "signin") {
+        const target = channel === "email" ? { email } : { phone };
+        await api("/api/auth/otp/verify", { method: "POST", json: { channel, ...target, token: otp } });
+        toast.success("Welcome back!");
+      } else {
+        await api("/api/auth/signup/verify", { method: "POST", json: { ...signup, channel, token: otp } });
+        toast.success(`Welcome to PricePulse, ${signup.name.split(" ")[0]}!`);
+      }
       router.replace(next);
       router.refresh();
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Verification failed");
+      fail(err, "Verification failed");
       setLoading(false);
     }
   }
@@ -96,6 +151,41 @@ export function LoginView({ devMode, publicDemo, devCode, authConfigured, google
       options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
     });
   }
+
+  const channelTabs = (label: string) => (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Tabs value={channel} onValueChange={(v) => { setChannel(v as Channel); setFormError(null); }}>
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="email"><Mail aria-hidden /> Email</TabsTrigger>
+          <TabsTrigger value="phone"><Smartphone aria-hidden /> Mobile</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {!channelReady && anyChannel && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          {channel === "email" ? "Email" : "SMS"} codes aren&apos;t available yet. Use {channel === "email" ? "your mobile number" : "email"} instead.
+        </p>
+      )}
+    </div>
+  );
+
+  const phoneInput = (id: string, value: string, onChange: (v: string) => void, autoFocus?: boolean) => (
+    <div className="flex gap-2">
+      <span className="grid h-11 place-items-center rounded-xl border border-input bg-muted px-3 text-sm font-semibold" aria-hidden>🇮🇳 +91</span>
+      <Input id={id} type="tel" inputMode="numeric" autoComplete="tel-national" placeholder="98765 43210" value={value} onChange={(e) => onChange(e.target.value)} required autoFocus={autoFocus} />
+    </div>
+  );
+
+  const errorBox = formError && (
+    <div role="alert" className="text-sm font-medium text-destructive">
+      {formError.message}{" "}
+      {formError.switchTo && (
+        <button type="button" className="cursor-pointer font-semibold text-primary underline" onClick={() => switchMode(formError.switchTo!)}>
+          {formError.switchTo === "signup" ? "Create an account" : "Go to Sign in"}
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <main id="main" className="relative grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
@@ -150,12 +240,28 @@ export function LoginView({ devMode, publicDemo, devCode, authConfigured, google
             <LogoMark />
             <span className="font-display text-xl font-extrabold">PricePulse India</span>
           </div>
-          <h2 className="font-display text-3xl font-bold tracking-tight">{step === "identify" ? "Sign in" : "Enter your code"}</h2>
+
+          {step === "form" && (
+            <Tabs value={mode} onValueChange={(v) => switchMode(v as Mode)} className="mb-6">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="signin"><KeyRound aria-hidden /> Sign in</TabsTrigger>
+                <TabsTrigger value="signup"><UserPlus aria-hidden /> Sign up</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
+
+          <h2 className="font-display text-3xl font-bold tracking-tight">
+            {step === "verify" ? "Enter your code" : mode === "signin" ? "Welcome back" : "Create your profile"}
+          </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            {step === "identify" ? "Use a one-time password – no passwords to remember." : `We sent a 6-digit code to ${identifier}.`}
+            {step === "verify"
+              ? `We sent a 6-digit code to ${channel === "phone" ? `+91 ${destination.replace(/^\+91/, "")}` : destination}. It expires in 10 minutes.`
+              : mode === "signin"
+                ? "We'll send a one-time code to your email or mobile."
+                : "First time here? Tell us a little about you, then verify with a one-time code."}
           </p>
 
-          {reason === "expired" && (
+          {reason === "expired" && step === "form" && (
             <div role="status" className="mt-5 flex items-start gap-2.5 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
               <Clock className="mt-0.5 size-4 shrink-0" aria-hidden />
               You were signed out after {idleMinutes} minutes of inactivity. Please sign in again.
@@ -166,53 +272,35 @@ export function LoginView({ devMode, publicDemo, devCode, authConfigured, google
               Google sign-in failed. Please try again or use OTP.
             </div>
           )}
-          {devMode && (
+          {devLog && (
             <div className="mt-5 flex items-start gap-2.5 rounded-2xl border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-800 dark:text-sky-200" data-testid="dev-banner">
               <KeyRound className="mt-0.5 size-4 shrink-0" aria-hidden />
-              {publicDemo ? (
-                <span>
-                  <b>Demo mode</b> – this is a demo deployment, so no OTP is sent. Sign in with any email or mobile number and code{" "}
-                  <b className="font-mono">{devCode}</b>. Try <b>{"demo@pricepulse.dev"}</b> for a shared account with sample data, or your own
-                  email for a private one (tied to this browser).
-                </span>
-              ) : (
-                <span>
-                  <b>Developer mode</b> – Supabase keys aren&apos;t set, so no OTP is sent. Use any email/phone and code <b className="font-mono">{devCode}</b>.
-                </span>
-              )}
+              <span><b>Developer mode</b> – no email/SMS provider is configured, so codes are printed in the server console.</span>
             </div>
           )}
-          {!authConfigured && (
-            <div role="alert" className="mt-5 rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              Authentication isn&apos;t configured. Set Supabase keys in the environment.
+          {!anyChannel && (
+            <div role="alert" className="mt-5 rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" data-testid="otp-unavailable">
+              Sign-in codes can&apos;t be sent yet. The site owner needs to connect an email (Resend) or SMS (Twilio Verify) provider.
             </div>
           )}
 
           <AnimatePresence mode="wait">
-            {step === "identify" ? (
-              <motion.form key="identify" onSubmit={sendOtp} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="mt-6 space-y-5" noValidate>
-                <Tabs value={channel} onValueChange={(v) => { setChannel(v as Channel); setFormError(null); }}>
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="email"><Mail aria-hidden /> Email</TabsTrigger>
-                    <TabsTrigger value="phone"><Smartphone aria-hidden /> Mobile</TabsTrigger>
-                  </TabsList>
-                </Tabs>
+            {step === "form" && mode === "signin" && (
+              <motion.form key="signin" onSubmit={sendCode} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="mt-6 space-y-5" noValidate>
+                {channelTabs("Sign in with")}
                 {channel === "email" ? (
                   <div className="space-y-2">
                     <Label htmlFor="email">Email address</Label>
-                    <Input id="email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required aria-invalid={Boolean(formError)} autoFocus />
+                    <Input id="email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
                   </div>
                 ) : (
                   <div className="space-y-2">
                     <Label htmlFor="phone">Mobile number</Label>
-                    <div className="flex gap-2">
-                      <span className="grid h-11 place-items-center rounded-xl border border-input bg-muted px-3 text-sm font-semibold" aria-hidden>🇮🇳 +91</span>
-                      <Input id="phone" type="tel" inputMode="numeric" autoComplete="tel-national" placeholder="98765 43210" value={phone} onChange={(e) => setPhone(e.target.value)} required aria-invalid={Boolean(formError)} autoFocus />
-                    </div>
+                    {phoneInput("phone", phone, setPhone, true)}
                   </div>
                 )}
-                {formError && <p role="alert" className="text-sm font-medium text-destructive">{formError}</p>}
-                <Button type="submit" size="lg" className="w-full" disabled={loading || !identifier || !authConfigured}>
+                {errorBox}
+                <Button type="submit" size="lg" className="w-full" disabled={loading || !(channel === "email" ? email : phone) || !channelReady}>
                   {loading ? <Loader2 className="animate-spin" aria-hidden /> : null} Send OTP
                 </Button>
                 {googleConfig && (
@@ -225,19 +313,69 @@ export function LoginView({ devMode, publicDemo, devCode, authConfigured, google
                     </Button>
                   </>
                 )}
+                <p className="text-center text-sm text-muted-foreground">
+                  New to PricePulse?{" "}
+                  <button type="button" className="cursor-pointer font-semibold text-primary hover:underline" onClick={() => switchMode("signup")}>Create an account</button>
+                </p>
               </motion.form>
-            ) : (
-              <motion.form key="verify" onSubmit={verifyOtp} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} className="mt-6 space-y-5">
+            )}
+
+            {step === "form" && mode === "signup" && (
+              <motion.form key="signup" onSubmit={sendCode} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} className="mt-6 space-y-4" noValidate>
+                <div className="space-y-2">
+                  <Label htmlFor="su-name">Full name</Label>
+                  <Input id="su-name" autoComplete="name" placeholder="Priya Sharma" value={signup.name} onChange={(e) => setSignup({ ...signup, name: e.target.value })} required autoFocus />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="su-phone">Mobile number</Label>
+                  {phoneInput("su-phone", signup.phone, (v) => setSignup({ ...signup, phone: v }))}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="su-email">Email ID</Label>
+                  <Input id="su-email" type="email" autoComplete="email" placeholder="you@example.com" value={signup.email} onChange={(e) => setSignup({ ...signup, email: e.target.value })} required />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="su-dob">Date of birth</Label>
+                    <Input id="su-dob" type="date" autoComplete="bday" max={maxDob()} value={signup.dateOfBirth} onChange={(e) => setSignup({ ...signup, dateOfBirth: e.target.value })} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="su-gender">Gender</Label>
+                    <select id="su-gender" className={selectClass} value={signup.gender} onChange={(e) => setSignup({ ...signup, gender: e.target.value as Gender })} required>
+                      <option value="" disabled>Select</option>
+                      {GENDERS.map((g) => <option key={g} value={g}>{GENDER_LABELS[g]}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {channelTabs("Send verification code to")}
+                {errorBox}
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full"
+                  disabled={loading || !channelReady || !signup.name || !signup.email || !signup.phone || !signup.dateOfBirth}
+                >
+                  {loading ? <Loader2 className="animate-spin" aria-hidden /> : null} Continue
+                </Button>
+                <p className="text-center text-sm text-muted-foreground">
+                  Already have an account?{" "}
+                  <button type="button" className="cursor-pointer font-semibold text-primary hover:underline" onClick={() => switchMode("signin")}>Sign in</button>
+                </p>
+              </motion.form>
+            )}
+
+            {step === "verify" && (
+              <motion.form key="verify" onSubmit={verifyCode} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} className="mt-6 space-y-5">
                 <OtpInput value={otp} onChange={setOtp} disabled={loading} autoFocus />
-                {formError && <p role="alert" className="text-sm font-medium text-destructive">{formError}</p>}
+                {errorBox}
                 <Button type="submit" size="lg" className="w-full" disabled={loading || otp.length !== 6}>
-                  {loading ? <Loader2 className="animate-spin" aria-hidden /> : null} Verify & continue
+                  {loading ? <Loader2 className="animate-spin" aria-hidden /> : null} {mode === "signup" ? "Verify & create account" : "Verify & sign in"}
                 </Button>
                 <div className="flex items-center justify-between text-sm">
-                  <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-muted-foreground hover:text-foreground" onClick={() => { setStep("identify"); setFormError(null); }}>
-                    <ArrowLeft className="size-4" aria-hidden /> Change {channel === "email" ? "email" : "number"}
+                  <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-muted-foreground hover:text-foreground" onClick={() => { setStep("form"); setFormError(null); }}>
+                    <ArrowLeft className="size-4" aria-hidden /> {mode === "signup" ? "Edit details" : `Change ${channel === "email" ? "email" : "number"}`}
                   </button>
-                  <button type="button" className="cursor-pointer font-semibold text-primary hover:underline" onClick={() => sendOtp()} disabled={loading}>
+                  <button type="button" className="cursor-pointer font-semibold text-primary hover:underline" onClick={() => sendCode()} disabled={loading}>
                     Resend code
                   </button>
                 </div>
