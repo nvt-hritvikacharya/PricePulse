@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
   // Docker builds set NEXT_OUTPUT=standalone for a minimal runtime image; `next start` uses the default.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   poweredByHeader: false,
+  // Inlined at build time so the flag from .env.production holds on hosts that don't load .env files at runtime.
+  env: process.env.ALLOW_DEV_AUTH_IN_PRODUCTION
+    ? { ALLOW_DEV_AUTH_IN_PRODUCTION: process.env.ALLOW_DEV_AUTH_IN_PRODUCTION }
+    : {},
   reactStrictMode: true,
   serverExternalPackages: ["ioredis", "web-push", "nodemailer"],
   images: {

@@ -17,9 +17,12 @@ import { OtpInput } from "./otp-input";
 
 interface Props {
   devMode: boolean;
+  /** Dev OTP enabled on a production deployment: a public demo. */
+  publicDemo: boolean;
   devCode?: string;
   authConfigured: boolean;
-  googleEnabled: boolean;
+  /** Supabase public URL + anon key, present only when Google sign-in is enabled. */
+  google?: { url: string; anonKey: string };
   reason?: string;
   error?: string;
   next: string;
@@ -39,7 +42,7 @@ function GoogleIcon() {
   );
 }
 
-export function LoginView({ devMode, devCode, authConfigured, googleEnabled, reason, error, next, idleMinutes }: Props) {
+export function LoginView({ devMode, publicDemo, devCode, authConfigured, google: googleConfig, reason, error, next, idleMinutes }: Props) {
   const router = useRouter();
   const [channel, setChannel] = useState<Channel>("email");
   const [step, setStep] = useState<"identify" | "verify">("identify");
@@ -60,7 +63,7 @@ export function LoginView({ devMode, devCode, authConfigured, googleEnabled, rea
       await api("/api/auth/otp/send", { method: "POST", json: payload });
       setStep("verify");
       setOtp("");
-      toast.success(devMode ? `Dev mode: use code ${devCode}` : `Code sent to ${identifier}`);
+      toast.success(devMode ? `${publicDemo ? "Demo" : "Dev"} mode: use code ${devCode}` : `Code sent to ${identifier}`);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Couldn't send the code. Try again.");
     } finally {
@@ -86,7 +89,7 @@ export function LoginView({ devMode, devCode, authConfigured, googleEnabled, rea
 
   async function google() {
     const { createSupabaseBrowserClient } = await import("../supabase-browser");
-    const supabase = createSupabaseBrowserClient();
+    const supabase = createSupabaseBrowserClient(googleConfig?.url, googleConfig?.anonKey);
     if (!supabase) return toast.error("Google sign-in is not configured");
     await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -166,9 +169,17 @@ export function LoginView({ devMode, devCode, authConfigured, googleEnabled, rea
           {devMode && (
             <div className="mt-5 flex items-start gap-2.5 rounded-2xl border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-800 dark:text-sky-200" data-testid="dev-banner">
               <KeyRound className="mt-0.5 size-4 shrink-0" aria-hidden />
-              <span>
-                <b>Developer mode</b> – Supabase keys aren&apos;t set, so no OTP is sent. Use any email/phone and code <b className="font-mono">{devCode}</b>.
-              </span>
+              {publicDemo ? (
+                <span>
+                  <b>Demo mode</b> – this is a demo deployment, so no OTP is sent. Sign in with any email or mobile number and code{" "}
+                  <b className="font-mono">{devCode}</b>. Try <b>{"demo@pricepulse.dev"}</b> for a shared account with sample data, or your own
+                  email for a private one (tied to this browser).
+                </span>
+              ) : (
+                <span>
+                  <b>Developer mode</b> – Supabase keys aren&apos;t set, so no OTP is sent. Use any email/phone and code <b className="font-mono">{devCode}</b>.
+                </span>
+              )}
             </div>
           )}
           {!authConfigured && (
@@ -204,7 +215,7 @@ export function LoginView({ devMode, devCode, authConfigured, googleEnabled, rea
                 <Button type="submit" size="lg" className="w-full" disabled={loading || !identifier || !authConfigured}>
                   {loading ? <Loader2 className="animate-spin" aria-hidden /> : null} Send OTP
                 </Button>
-                {googleEnabled && (
+                {googleConfig && (
                   <>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />

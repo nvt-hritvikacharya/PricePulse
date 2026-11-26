@@ -2,9 +2,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 
 /** Browser Supabase client (used only to kick off Google OAuth). */
-export function createSupabaseBrowserClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+export function createSupabaseBrowserClient(url?: string, key?: string) {
   if (!url || !key) return null;
   return createBrowserClient(url, key);
 }

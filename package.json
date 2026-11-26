@@ -5,7 +5,7 @@
   "description": "PricePulse India - compare prices across Indian e-commerce sites, track history and set alerts.",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && next build && node scripts/deploy-db.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

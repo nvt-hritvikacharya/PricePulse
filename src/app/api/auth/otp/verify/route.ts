@@ -1,9 +1,10 @@
 import { handler, HttpError, json } from "@/lib/api";
-import { env, isDevAuthEnabled, isSupabaseConfigured } from "@/lib/env";
+import { env, isDevAuthEnabled, isPublicDemoAuth, isSupabaseConfigured } from "@/lib/env";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { verifyOtpSchema } from "@/features/auth/schemas";
 import { createSupabaseServerClient } from "@/features/auth/server/supabase";
 import { startSession, upsertUser } from "@/features/auth/server/session";
+import { authorizeDemoLogin } from "@/features/auth/server/demo-auth";
 
 /** Verifies the OTP, upserts the local user and starts a 1-hour sliding session. */
 export const POST = handler(async (req: Request) => {
@@ -30,11 +31,10 @@ export const POST = handler(async (req: Request) => {
   } else {
     if (!isDevAuthEnabled) throw new HttpError(503, "Authentication is not configured", "auth_unconfigured");
     if (body.token !== env.DEV_OTP_CODE) throw new HttpError(400, "Invalid code. In dev mode use the code shown on screen.", "otp_invalid");
-    identity = {
-      email: body.channel === "email" ? body.email : null,
-      phone: body.channel === "phone" ? body.phone : null,
-      method: "DEV",
-    };
+    const email = body.channel === "email" ? body.email : null;
+    const phone = body.channel === "phone" ? body.phone : null;
+    const demoDeviceHash = isPublicDemoAuth ? await authorizeDemoLogin({ email, phone }) : null;
+    identity = { email, phone, method: "DEV", demoDeviceHash };
   }
 
   const user = await upsertUser(identity);

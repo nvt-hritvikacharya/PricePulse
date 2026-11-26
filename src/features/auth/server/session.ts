@@ -2,7 +2,7 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import type { AuthMethod, User } from "@prisma/client";
 import { db } from "@/lib/db";
-import { adminIdentifiers } from "@/lib/env";
+import { adminIdentifiers, isPublicDemoAuth } from "@/lib/env";
 import { HttpError } from "@/lib/api";
 import { logger } from "@/lib/logger";
 import { SESSION_COOKIE, idleSeconds, sessionCookieOptions, signSession, verifySession } from "../session-token";
@@ -27,13 +27,16 @@ export interface IdentityInput {
   name?: string | null;
   avatarUrl?: string | null;
   method: AuthMethod;
+  demoDeviceHash?: string | null;
 }
 
 /** Finds or creates the local user row for an authenticated identity. */
 export async function upsertUser(identity: IdentityInput): Promise<User> {
   const email = identity.email?.toLowerCase() || null;
   const phone = identity.phone || null;
-  const isAdmin = (email && adminIdentifiers.has(email)) || (phone && adminIdentifiers.has(phone));
+  // Anyone can claim any identifier with the public demo code, so it never grants admin.
+  const canBeAdmin = !(isPublicDemoAuth && identity.method === "DEV");
+  const isAdmin = canBeAdmin && ((email && adminIdentifiers.has(email)) || (phone && adminIdentifiers.has(phone)));
 
   const existing = await db.user.findFirst({
     where: {
@@ -70,6 +73,7 @@ export async function upsertUser(identity: IdentityInput): Promise<User> {
       avatarUrl: identity.avatarUrl ?? undefined,
       authMethod: identity.method,
       role: isAdmin ? "ADMIN" : "USER",
+      demoDeviceHash: identity.demoDeviceHash ?? undefined,
       lastLoginAt: new Date(),
       lastActiveAt: new Date(),
       notificationPreference: { create: {} },

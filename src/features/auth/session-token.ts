@@ -23,9 +23,30 @@ export function idleSeconds(): number {
   return Math.max(60, Math.round(minutes * 60));
 }
 
-function secret(): Uint8Array {
-  const s = process.env.SESSION_SECRET || "dev-insecure-session-secret-change-me-please-0000";
-  return new TextEncoder().encode(s);
+let secretKey: Promise<Uint8Array> | undefined;
+
+/**
+ * HMAC key for session tokens: SESSION_SECRET when set, otherwise derived from the
+ * (secret, host-supplied) DATABASE_URL so a deployment without SESSION_SECRET still gets a private key.
+ */
+function secret(): Promise<Uint8Array> {
+  secretKey ??= deriveSecret().catch((error: unknown) => {
+    secretKey = undefined;
+    throw error;
+  });
+  return secretKey;
+}
+
+async function deriveSecret(): Promise<Uint8Array> {
+  const explicit = process.env.SESSION_SECRET?.trim();
+  if (explicit) {
+    if (explicit.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
+    return new TextEncoder().encode(explicit);
+  }
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) throw new Error("Set SESSION_SECRET (or DATABASE_URL) to sign sessions");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`pricepulse-session-v1\n${databaseUrl}`));
+  return new Uint8Array(digest);
 }
 
 export async function signSession(claims: Omit<SessionClaims, "act">, now = Math.floor(Date.now() / 1000)) {
@@ -33,14 +54,14 @@ export async function signSession(claims: Omit<SessionClaims, "act">, now = Math
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt(now)
     .setExpirationTime(now + idleSeconds())
-    .sign(secret());
+    .sign(await secret());
   return token;
 }
 
 export async function verifySession(token: string | undefined): Promise<SessionClaims | null> {
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
+    const { payload } = await jwtVerify(token, await secret(), { algorithms: ["HS256"] });
     if (typeof payload.sid !== "string" || typeof payload.uid !== "string") return null;
     return payload as unknown as SessionClaims;
   } catch {

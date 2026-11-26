@@ -72,7 +72,7 @@ export function ProfileView() {
   const { theme, setTheme } = useTheme();
   const fileRef = useRef<HTMLInputElement>(null);
   const profile = useQuery({ queryKey: ["profile"], queryFn: () => api<{ user: Profile }>("/api/profile") });
-  const prefsQ = useQuery({ queryKey: ["prefs"], queryFn: () => api<{ preferences: Prefs; capabilities: { email: boolean; push: boolean } }>("/api/notifications/preferences") });
+  const prefsQ = useQuery({ queryKey: ["prefs"], queryFn: () => api<{ preferences: Prefs; capabilities: { email: boolean; push: boolean }; vapidPublicKey: string | null }>("/api/notifications/preferences") });
   const viewed = useQuery({ queryKey: ["recently-viewed"], queryFn: () => api<{ items: { viewedAt: string; product: MiniProduct }[] }>("/api/recently-viewed") });
 
   const [form, setForm] = useState({ name: "", email: "", phone: "" });
@@ -112,7 +112,7 @@ export function ProfileView() {
   }
 
   async function onEnablePush() {
-    const res = await enablePush().catch(() => "unsupported" as const);
+    const res = await enablePush(prefsQ.data?.vapidPublicKey).catch(() => "unsupported" as const);
     const msg = { enabled: "Push notifications enabled on this device", denied: "Permission denied in the browser", unsupported: "This browser doesn't support web push", unconfigured: "Web push isn't configured on the server (VAPID keys missing)" }[res];
     if (res === "enabled") toast.success(msg);
     else toast.error(msg);

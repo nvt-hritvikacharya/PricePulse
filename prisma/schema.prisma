@@ -53,6 +53,8 @@ model User {
   updatedAt              DateTime                @updatedAt
   lastLoginAt            DateTime?
   lastActiveAt           DateTime?
+  /// Public demo mode: SHA-256 of the browser cookie that created this dev-login account.
+  demoDeviceHash         String?
   sessions               Session[]
   searchHistory          SearchHistory[]
   wishlist               Wishlist[]

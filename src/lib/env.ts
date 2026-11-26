@@ -8,13 +8,17 @@ import { z } from "zod";
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   NEXT_PUBLIC_APP_URL: z.string().default("http://localhost:3000"),
-  SESSION_SECRET: z.string().default("dev-insecure-session-secret-change-me-please-0000"),
+  SESSION_SECRET: z.string().optional(),
   SESSION_IDLE_MINUTES: z.coerce.number().int().positive().default(60),
   ADMIN_EMAILS: z.string().default(""),
   DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().optional(),
+  // Runtime (non-inlined) aliases, so hosts that can't set NEXT_PUBLIC_* at build time still work.
+  SUPABASE_URL: z.string().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
+  ENABLE_GOOGLE_AUTH: z.string().optional(),
   DEV_OTP_CODE: z.string().default("123456"),
   ALLOW_DEV_AUTH_IN_PRODUCTION: z.string().optional(),
   AMAZON_PAAPI_ACCESS_KEY: z.string().optional(),
@@ -35,6 +39,7 @@ const schema = z.object({
   SMTP_URL: z.string().optional(),
   EMAIL_FROM: z.string().default("PricePulse India <alerts@pricepulse.in>"),
   NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().default("mailto:alerts@pricepulse.in"),
   CRON_SECRET: z.string().optional(),
@@ -47,14 +52,24 @@ const raw = Object.fromEntries(
 
 export const env = schema.parse(raw);
 
-export const isSupabaseConfigured = Boolean(
-  env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-);
+export const supabaseUrl = env.SUPABASE_URL ?? env.NEXT_PUBLIC_SUPABASE_URL;
+export const supabaseAnonKey = env.SUPABASE_ANON_KEY ?? env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const isGoogleAuthEnabled =
+  isSupabaseConfigured && (env.ENABLE_GOOGLE_AUTH ?? process.env.NEXT_PUBLIC_ENABLE_GOOGLE_AUTH) === "true";
+
+export const vapidPublicKey = env.VAPID_PUBLIC_KEY ?? env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
 /** Dev OTP bypass is only available when Supabase is not configured. */
 export const isDevAuthEnabled =
   !isSupabaseConfigured &&
-  (env.NODE_ENV !== "production" || env.ALLOW_DEV_AUTH_IN_PRODUCTION === "true");
+  (env.NODE_ENV !== "production" || process.env.ALLOW_DEV_AUTH_IN_PRODUCTION === "true");
+
+/**
+ * Public demo: the dev OTP is on in a production deployment, so anyone who can open the app
+ * knows the code. Dev logins then never get admin rights and can't take over another browser's account.
+ */
+export const isPublicDemoAuth = isDevAuthEnabled && env.NODE_ENV === "production";
 
 export const adminIdentifiers = new Set(
   env.ADMIN_EMAILS.split(",")
