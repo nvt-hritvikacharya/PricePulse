@@ -11,10 +11,9 @@ const nextConfig: NextConfig = {
   // Docker builds set NEXT_OUTPUT=standalone for a minimal runtime image; `next start` uses the default.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   poweredByHeader: false,
-  // Inlined at build time so the flag from .env.production holds on hosts that don't load .env files at runtime.
-  env: process.env.ALLOW_DEV_AUTH_IN_PRODUCTION
-    ? { ALLOW_DEV_AUTH_IN_PRODUCTION: process.env.ALLOW_DEV_AUTH_IN_PRODUCTION }
-    : {},
+  // Hosted builds run as a public demo until Supabase is configured; the Docker image
+  // (standalone output) keeps the dev OTP off unless ALLOW_DEV_AUTH_IN_PRODUCTION=true.
+  env: { DEV_AUTH_PRODUCTION_DEFAULT: process.env.NEXT_OUTPUT === "standalone" ? "false" : "true" },
   reactStrictMode: true,
   serverExternalPackages: ["ioredis", "web-push", "nodemailer"],
   images: {

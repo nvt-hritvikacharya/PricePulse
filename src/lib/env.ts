@@ -63,7 +63,8 @@ export const vapidPublicKey = env.VAPID_PUBLIC_KEY ?? env.NEXT_PUBLIC_VAPID_PUBL
 /** Dev OTP bypass is only available when Supabase is not configured. */
 export const isDevAuthEnabled =
   !isSupabaseConfigured &&
-  (env.NODE_ENV !== "production" || process.env.ALLOW_DEV_AUTH_IN_PRODUCTION === "true");
+  (env.NODE_ENV !== "production" ||
+    (env.ALLOW_DEV_AUTH_IN_PRODUCTION ?? process.env.DEV_AUTH_PRODUCTION_DEFAULT) === "true");
 
 /**
  * Public demo: the dev OTP is on in a production deployment, so anyone who can open the app

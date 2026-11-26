@@ -43,7 +43,7 @@ npm run dev                     # http://localhost:3000
 | `admin@pricepulse.dev` | ADMIN | Can open `/admin`. Any email listed in `ADMIN_EMAILS` gets ADMIN on login |
 | `demo@pricepulse.dev` / `9876543210` | USER | Has a wishlist, alerts and recently viewed items |
 
-> The dev OTP bypass is **disabled automatically** in two cases: when Supabase keys are present, or when `NODE_ENV=production`. To demo a production build without Supabase (`npm run build && npm start`, or Docker), set `ALLOW_DEV_AUTH_IN_PRODUCTION=true`. On a public deployment it runs in a restricted public-demo mode (see [Publishing on Cursor](#publishing-on-cursor)).
+> The dev OTP bypass is **disabled automatically** when Supabase keys are present. `npm run build && npm start` builds keep it on as a restricted public demo (see [Publishing on Cursor](#publishing-on-cursor)); set `ALLOW_DEV_AUTH_IN_PRODUCTION=false` to turn it off. The Docker image keeps it off unless `ALLOW_DEV_AUTH_IN_PRODUCTION=true`.
 
 ## Quick start (Docker)
 
@@ -241,14 +241,14 @@ The repo is set up for Cursor's app hosting:
 - `cursor-app.json` asks the host for a Postgres database; the host sets `DATABASE_URL` for build and runtime.
 - `npm run build` ends with `scripts/deploy-db.mjs`, which runs `prisma migrate deploy` and the idempotent seed against that database (skipped when `DATABASE_URL` is unset; set `SKIP_SEED=true` to skip only the seed).
 - Redis is optional. Without `REDIS_URL` the cache and rate limiter are in-process (per instance).
-- `.env.production` turns on the dev OTP as a **public demo** until `SUPABASE_URL` + `SUPABASE_ANON_KEY` are set. In public demo mode the code never grants ADMIN (seeded admins and `ADMIN_EMAILS` are refused), only accounts created with the demo code can be opened, and each such account is bound to the browser that created it. `demo@pricepulse.dev` stays a shared sample account.
+- Production builds (except the Docker image) turn on the dev OTP as a **public demo** until `SUPABASE_URL` + `SUPABASE_ANON_KEY` are set. In public demo mode the code never grants ADMIN (seeded admins and `ADMIN_EMAILS` are refused), only accounts created with the demo code can be opened, and each such account is bound to the browser that created it. `demo@pricepulse.dev` stays a shared sample account.
 - Secrets (Supabase, provider keys, `LLM_API_KEY`, `SMTP_URL`, VAPID, `CRON_SECRET`, `SESSION_SECRET`) are set as app secrets on the host. Use the runtime names `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ENABLE_GOOGLE_AUTH` and `VAPID_PUBLIC_KEY`, since `NEXT_PUBLIC_*` values are inlined at build time.
 
 ## Production checklist
 
 - [ ] Set a strong `SESSION_SECRET` (≥ 32 chars) and a strong `CRON_SECRET`.
 - [ ] Configure Supabase: Email OTP template using `{{ .Token }}`, SMS provider for phone OTP, and Google OAuth with redirect URL `https://<your-domain>/auth/callback`.
-- [ ] Remove `ALLOW_DEV_AUTH_IN_PRODUCTION` (and `.env.production`, or set Supabase keys, which turns the dev OTP off).
+- [ ] Set Supabase keys (which turns the dev OTP off), or set `ALLOW_DEV_AUTH_IN_PRODUCTION=false`.
 - [ ] Add at least one price-provider key and set `MOCK_PROVIDER=never` to hide demo data.
 - [ ] Configure `SMTP_URL` and VAPID keys for alerts.
 - [ ] Point `REDIS_URL` at a managed Redis. It is required for correct rate limiting across multiple instances.

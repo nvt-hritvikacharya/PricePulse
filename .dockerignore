@@ -7,4 +7,3 @@ build
 .env.local
 *.tsbuildinfo
 npm-debug.log*
-.env.production
